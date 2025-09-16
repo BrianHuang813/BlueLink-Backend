@@ -1,23 +1,28 @@
 module bluelink::bluelink {
-    use sui::object::{Self, ID, UID};
-    use sui::tx_context::{Self, TxContext};
-    use sui::transfer;
     use sui::coin::{Self, Coin};
     use sui::sui::SUI;
     use sui::balance::{Self, Balance};
     use sui::event;
     use std::string::{Self, String};
-    use std::vector;
 
-    // Error codes
-    const EInsufficientFunds: u64 = 1;
-    const ENotProjectCreator: u64 = 2;
-    const EInsufficientBalance: u64 = 3;
+    // --- Error codes ---
+    // General errors
 
-    // Struct definitions
-    struct Project has key, store {
+    // Donation related errors (2xx)
+    const EDonorInsufficientBalance: u64 = 201; // Donor's balance is insufficient
+    const EDonationAmountIsZero: u64 = 202; // Donation amount must be greater than zero
+    
+    // Withdrawal related errors (3xx)
+    const ENotProjectCreator: u64 = 300; // Only project creator can withdraw funds
+    const EProjectInsufficientFunds: u64 = 301; // Insufficient funds to withdraw
+    const EWithdrawAmountIsZero: u64 = 302; // Withdrawal amount must be greater than zero
+
+    // --- Struct definitions ---
+    // Donation project
+    public struct Project has key, store {
         id: UID,
         creator: address,
+        creator_name: String,
         name: String,
         description: String,
         funding_goal: u64,
@@ -25,48 +30,47 @@ module bluelink::bluelink {
         donor_count: u64,
     }
 
-    struct DonationReceipt has key, store {
+    // Donation receipt NFT
+    public struct DonationReceipt has key, store {
         id: UID,
-        project_id: ID,
-        donor: address,
-        amount: u64,
+        project_id: ID, // associated project
+        donor: address, // donor's address
+        amount: u64, // amount donated
     }
 
     // Events
-    struct ProjectCreated has copy, drop {
+    public struct ProjectCreated has copy, drop {
         project_id: ID,
         creator: address,
         name: String,
         funding_goal: u64,
     }
 
-    struct DonationMade has copy, drop {
+    public struct DonationMade has copy, drop {
         project_id: ID,
         donor: address,
         amount: u64,
         receipt_id: ID,
     }
 
-    struct FundsWithdrawn has copy, drop {
+    public struct FundsWithdrawn has copy, drop {
         project_id: ID,
-        creator: address,
+        withdrawer: address,
         amount: u64,
     }
 
-    // Entry functions
-    public entry fun create_project(
-        name: vector<u8>,
-        description: vector<u8>,
-        funding_goal: u64,
-        ctx: &mut TxContext
-    ) {
-        let creator = tx_context::sender(ctx);
-        let project_id = object::new(ctx);
+    // A entry func of listing available donation projects on the platform
+    entry fun create_project(name: vector<u8>, description: vector<u8>, funding_goal: u64, ctx: &mut TxContext){
+        
+        let creator = tx_context::sender(ctx); // Project creator(NGO / Government)
+        let project_id = object::new(ctx); // Unique project ID
         let project_id_copy = object::uid_to_inner(&project_id);
         
+        // Create a new project object
         let project = Project {
             id: project_id,
             creator,
+            creator_name: string::utf8(name),
             name: string::utf8(name),
             description: string::utf8(description),
             funding_goal,
@@ -74,6 +78,7 @@ module bluelink::bluelink {
             donor_count: 0,
         };
 
+        // Broadcast project creation event
         event::emit(ProjectCreated {
             project_id: project_id_copy,
             creator,
@@ -84,13 +89,9 @@ module bluelink::bluelink {
         transfer::public_transfer(project, creator);
     }
 
-    public entry fun donate(
-        project: &mut Project,
-        payment: Coin<SUI>,
-        ctx: &mut TxContext
-    ) {
+    entry fun donate(project: &mut Project, payment: Coin<SUI>, ctx: &mut TxContext){
         let amount = coin::value(&payment);
-        assert!(amount > 0, EInsufficientFunds);
+        assert!(amount > 0, EDonationAmountIsZero);
 
         let donor = tx_context::sender(ctx);
         let project_id = object::uid_to_inner(&project.id);
@@ -123,32 +124,31 @@ module bluelink::bluelink {
         transfer::public_transfer(receipt, donor);
     }
 
-    public entry fun withdraw(
-        project: &mut Project,
-        ctx: &mut TxContext
-    ) {
-        let creator = tx_context::sender(ctx);
-        assert!(project.creator == creator, ENotProjectCreator);
-        
-        let balance_amount = balance::value(&project.total_raised);
-        assert!(balance_amount > 0, EInsufficientBalance);
-        
-        let withdrawn_balance = balance::split(&mut project.total_raised, balance_amount);
-        let withdrawn_coin = coin::from_balance(withdrawn_balance, ctx);
+    entry fun withdraw(project: &mut Project, ctx: &mut TxContext){
+
+        let withdrawer = tx_context::sender(ctx); // Withdraw transaction sender
+        assert!(project.creator == withdrawer, ENotProjectCreator); // Only the project creator can withdraw funds
+
+        let fund_balance = balance::value(&project.total_raised); 
+        assert!(fund_balance > 0, EProjectInsufficientFunds); // Ensure there are enough funds to withdraw
+
+        let withdrawn_balance = balance::split(&mut project.total_raised, fund_balance); // total_raised is a balance type
+        let withdrawn_coin = coin::from_balance(withdrawn_balance, ctx); // Convert balance back to coin for transfer
         
         let project_id = object::uid_to_inner(&project.id);
         
         event::emit(FundsWithdrawn {
             project_id,
-            creator,
-            amount: balance_amount,
+            withdrawer,
+            amount: fund_balance,
         });
 
-        transfer::public_transfer(withdrawn_coin, creator);
+        transfer::public_transfer(withdrawn_coin, withdrawer);
     }
 
-    // Public view functions
-    public fun get_project_info(project: &Project): (String, String, u64, u64, u64, address) {
+    // --- Public view functions ---
+    // Return project details tuple
+    public fun get_project_info(project: &Project): (String, String, u64, u64, u64, address){
         (
             project.name,
             project.description,
