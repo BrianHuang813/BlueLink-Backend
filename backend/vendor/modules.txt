@@ -1,3 +1,6 @@
+# github.com/btcsuite/btcutil v1.0.2
+## explicit; go 1.13
+github.com/btcsuite/btcutil/base58
 # github.com/bytedance/sonic v1.9.1
 ## explicit; go 1.15
 github.com/bytedance/sonic
@@ -24,6 +27,16 @@ github.com/bytedance/sonic/utf8
 # github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311
 ## explicit; go 1.15
 github.com/chenzhuoyu/base64x
+# github.com/coming-chat/go-sui/v2 v2.0.1
+## explicit; go 1.18
+github.com/coming-chat/go-sui/v2/crypto
+github.com/coming-chat/go-sui/v2/lib
+github.com/coming-chat/go-sui/v2/move_types
+github.com/coming-chat/go-sui/v2/sui_protocol
+github.com/coming-chat/go-sui/v2/sui_types
+# github.com/fardream/go-bcs v0.2.1
+## explicit; go 1.19
+github.com/fardream/go-bcs/bcs
 # github.com/gabriel-vasile/mimetype v1.4.2
 ## explicit; go 1.20
 github.com/gabriel-vasile/mimetype
@@ -64,6 +77,9 @@ github.com/goccy/go-json/internal/encoder/vm_color_indent
 github.com/goccy/go-json/internal/encoder/vm_indent
 github.com/goccy/go-json/internal/errors
 github.com/goccy/go-json/internal/runtime
+# github.com/google/uuid v1.6.0
+## explicit
+github.com/google/uuid
 # github.com/joho/godotenv v1.5.1
 ## explicit; go 1.12
 github.com/joho/godotenv
@@ -79,6 +95,9 @@ github.com/leodido/go-urn
 # github.com/mattn/go-isatty v0.0.19
 ## explicit; go 1.15
 github.com/mattn/go-isatty
+# github.com/mitchellh/hashstructure/v2 v2.0.2
+## explicit; go 1.14
+github.com/mitchellh/hashstructure/v2
 # github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
 ## explicit
 github.com/modern-go/concurrent
@@ -119,6 +138,7 @@ github.com/ugorji/go/codec
 golang.org/x/arch/x86/x86asm
 # golang.org/x/crypto v0.9.0
 ## explicit; go 1.17
+golang.org/x/crypto/blake2b
 golang.org/x/crypto/sha3
 # golang.org/x/net v0.10.0
 ## explicit; go 1.17
