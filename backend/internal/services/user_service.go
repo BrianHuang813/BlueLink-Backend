@@ -17,22 +17,6 @@ func NewUserService(db *sql.DB) *UserService {
 	return &UserService{db: db}
 }
 
-// GetBasicInfo 取得使用者基本資訊（用於 middleware）
-// 只查詢必要的欄位，提高效能
-func (s *UserService) GetBasicInfo(walletAddress string) (userID int64, role string, err error) {
-	query := `SELECT id, role FROM users WHERE wallet_address = $1`
-
-	err = s.db.QueryRow(query, walletAddress).Scan(&userID, &role)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return 0, "", errors.New("user not found")
-		}
-		return 0, "", err
-	}
-
-	return userID, role, nil
-}
-
 // GetByID 根據 ID 取得完整使用者資料
 func (s *UserService) GetByID(userID int64) (*models.User, error) {
 	query := `
@@ -46,10 +30,12 @@ func (s *UserService) GetByID(userID int64) (*models.User, error) {
 		&user.ID,
 		&user.WalletAddress,
 		&user.Name,
-		&user.Email,
 		&user.Role,
+		&user.Timezone,
+		&user.Language,
 		&user.CreatedAt,
 		&user.UpdatedAt,
+		&user.DeletedAt,
 	)
 
 	if err != nil {
@@ -75,10 +61,12 @@ func (s *UserService) GetByWalletAddress(walletAddress string) (*models.User, er
 		&user.ID,
 		&user.WalletAddress,
 		&user.Name,
-		&user.Email,
 		&user.Role,
+		&user.Timezone,
+		&user.Language,
 		&user.CreatedAt,
 		&user.UpdatedAt,
+		&user.DeletedAt,
 	)
 
 	if err != nil {
@@ -118,14 +106,14 @@ func (s *UserService) Create(walletAddress string) (*models.User, error) {
 }
 
 // Update 更新使用者資料
-func (s *UserService) Update(userID int64, name, email string) error {
+func (s *UserService) Update(userID int64, name string) error {
 	query := `
 		UPDATE users 
 		SET name = $1, email = $2, updated_at = $3 
 		WHERE id = $4
 	`
 
-	result, err := s.db.Exec(query, name, email, time.Now(), userID)
+	result, err := s.db.Exec(query, name, time.Now(), userID)
 	if err != nil {
 		return err
 	}

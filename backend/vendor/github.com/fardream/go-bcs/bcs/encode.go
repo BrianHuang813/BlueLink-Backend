@@ -116,7 +116,7 @@ func (e *Encoder) encodeEnum(v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		if tag&tagValue_Ignore > 0 {
+		if tag.isIgnored() {
 			continue
 		}
 		fieldKind := field.Kind()
@@ -191,13 +191,10 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 		if err != nil {
 			return err
 		}
-		// ignored
-		if tag&tagValue_Ignore != 0 {
+		switch {
+		case tag.isIgnored():
 			continue
-		}
-
-		// optional
-		if tag&tagValue_Optional != 0 {
+		case tag.isOptional():
 			if field.Kind() != reflect.Pointer && field.Kind() != reflect.Interface {
 				return fmt.Errorf("optional field can only be pointer or interface")
 			}
@@ -215,10 +212,11 @@ func (e *Encoder) encodeStruct(v reflect.Value) error {
 				}
 			}
 			continue
-		}
-		// finally
-		if err := e.encode(field); err != nil {
-			return err
+		default:
+			// finally
+			if err := e.encode(field); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -262,6 +260,31 @@ func Marshal(v any) ([]byte, error) {
 	}
 
 	return b.Bytes(), nil
+}
+
+type Option[T any] struct {
+	Some T
+	None bool
+}
+
+func (p *Option[T]) MarshalBCS() ([]byte, error) {
+	if p.None {
+		return []byte{0}, nil
+	}
+	b, err := Marshal(p.Some)
+	return append([]byte{1}, b...), err
+}
+
+func (p *Option[T]) UnmarshalBCS(r io.Reader) (int, error) {
+	buf := new(bytes.Buffer)
+	io.Copy(buf, r)
+	tmp := buf.Bytes()
+	if len(tmp) == 1 {
+		p.None = true
+		return 1, nil
+	}
+	b := tmp[1:]
+	return Unmarshal(b, &p.Some)
 }
 
 // MustMarshal [Marshal] v, and panics if error.

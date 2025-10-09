@@ -5,76 +5,76 @@ import (
 	"bluelink-backend/internal/handlers/users"
 	"bluelink-backend/internal/middleware"
 	"bluelink-backend/internal/services"
+	"bluelink-backend/internal/session"
 	"bluelink-backend/internal/sui"
 
 	"github.com/gin-gonic/gin"
 )
 
 // SetupRoutes 設定所有路由
-func SetupRoutes(r *gin.Engine, suiClient *sui.Client, userService *services.UserService) {
+func SetupRoutes(
+	r *gin.Engine,
+	suiClient *sui.Client,
+	userService *services.UserService,
+	sessionManager *session.MemorySessionManager,
+) {
 	// 初始化 handlers
-	authHandler := auth.NewAuthHandler(userService)
+	authHandler := auth.NewAuthHandler(userService, sessionManager)
 	profileHandler := users.NewProfileHandler(userService)
 
 	// API v1
-	v1 := r.Group("/api/v1")
+	public := r.Group("/api/v1")
 
-	// ===== Public Routes（不需要驗證）=====
+	// ===== Public Routes =====
 	{
 		// Health check
-		v1.GET("/health", func(c *gin.Context) {
+		public.GET("/health", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"status":  "ok",
 				"message": "BlueLink Backend is running",
 			})
 		})
 
-		// 錢包驗證相關
-		authGroup := v1.Group("/auth")
+		// 認證端點
+		authGroup := public.Group("/auth")
 		{
 			authGroup.POST("/challenge", authHandler.GenerateChallenge) // 取得挑戰訊息
-			authGroup.POST("/verify", authHandler.VerifySignature)      // 驗證簽名
+			authGroup.POST("/verify", authHandler.VerifySignature)      // 驗證簽名並登入
 		}
 
-		// 公開的債券資訊
-		v1.GET("/bonds", func(c *gin.Context) {
+		// 公開資訊
+		public.GET("/bonds", func(c *gin.Context) {
 			c.JSON(200, gin.H{"message": "List all public bonds"})
-		})
-
-		v1.GET("/bonds/:id", func(c *gin.Context) {
-			c.JSON(200, gin.H{"message": "Get bond detail"})
 		})
 	}
 
-	// ===== Protected Routes（需要錢包驗證）=====
-	protected := v1.Group("/")
+	// ===== Protected Routes (Session Authentication)=====
+	protected := public.Group("/")
 	protected.Use(
-		middleware.WalletAuthMiddleware(),
-		middleware.UserContextMiddleware(),
+		middleware.SessionAuthMiddleware(sessionManager),      // 驗證 Session
+		middleware.BasicUserContextMiddleware(sessionManager), // 載入用戶資訊
 	)
 	{
-		// 使用者資料相關
-		protected.GET("/profile", profileHandler.GetProfile)          // 基本資料
-		protected.GET("/profile/full", profileHandler.GetFullProfile) // 完整資料
-		protected.PUT("/profile", profileHandler.UpdateProfile)       // 更新資料
+		// 認證管理
+		authGroup := protected.Group("/auth")
+		{
+			authGroup.POST("/logout", authHandler.Logout)
+			authGroup.POST("/logout-all", authHandler.LogoutAll)
+			authGroup.GET("/sessions", authHandler.GetActiveSessions)
+		}
 
-		// 債券操作（需要驗證）
+		// 使用者資料
+		protected.GET("/profile", profileHandler.GetProfile)
+		protected.GET("/profile/full", profileHandler.GetFullProfile)
+		protected.PUT("/profile", profileHandler.UpdateProfile)
+
+		// 債券操作
 		protected.POST("/bonds", func(c *gin.Context) {
-			c.JSON(201, gin.H{"message": "Create new bond"})
+			c.JSON(201, gin.H{"message": "Create bond"})
 		})
 
-		protected.POST("/bonds/:id/purchase", func(c *gin.Context) {
-			c.JSON(200, gin.H{"message": "Purchase bond"})
-		})
-
-		// 使用者的債券持有記錄
 		protected.GET("/my-bonds", func(c *gin.Context) {
 			c.JSON(200, gin.H{"message": "Get my bonds"})
-		})
-
-		// 使用者的交易歷史
-		protected.GET("/transactions", func(c *gin.Context) {
-			c.JSON(200, gin.H{"message": "Get my transactions"})
 		})
 	}
 }
