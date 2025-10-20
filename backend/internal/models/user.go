@@ -4,15 +4,16 @@ import "time"
 
 // User 使用者資料模型 (TODO: blacklist, KYC, 2FA, lastLoginAt, LastLoginIP...)
 type User struct {
-	ID            int64      `json:"id" db:"id"`
-	WalletAddress string     `json:"wallet_address" db:"wallet_address"`
-	Name          string     `json:"name,omitempty" db:"name"`
-	Role          string     `json:"role" db:"role"` // "buyer", "issuer", "admin"
-	Timezone      string     `json:"timezone,omitempty" db:"timezone"`
-	Language      string     `json:"language,omitempty" db:"language"`
-	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty" db:"deleted_at"` // 軟刪除時間戳記
+	ID              int64      `json:"id" db:"id"`
+	WalletAddress   string     `json:"wallet_address" db:"wallet_address"`
+	Role            string     `json:"role" db:"role"`
+	InstitutionName *string    `json:"institution_name,omitempty" db:"institution_name"` // 發行者機構名稱
+	Name            *string    `json:"name,omitempty" db:"name"`                         // 其他用戶的名稱
+	Timezone        string     `json:"timezone,omitempty" db:"timezone"`
+	Language        string     `json:"language,omitempty" db:"language"`
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
+	DeletedAt       *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 
 	// // ===== KYC/AML =====
 	// KYCStatus     string    `json:"kyc_status" db:"kyc_status"`         // "pending", "verified", "rejected"
@@ -45,5 +46,13 @@ type UserProfile struct {
 type UserBasicInfo struct {
 	ID            int64  `json:"id"`
 	WalletAddress string `json:"wallet_address"`
+	Name          string `json:"name,omitempty"`
 	Role          string `json:"role"` // "buyer", "issuer", "admin"
+}
+
+type InstitutionProfile struct {
+	ID              int64  `json:"id"`
+	WalletAddress   string `json:"wallet_address"`
+	Role            string `json:"role"` // "issuer", "admin"
+	InstitutionName string `json:"institution_name"`
 }

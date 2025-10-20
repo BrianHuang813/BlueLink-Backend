@@ -60,7 +60,7 @@ module bluelink::bluelink {
     }
 
     // A entry func of listing available donation projects on the platform
-    entry fun create_project(name: vector<u8>, description: vector<u8>, funding_goal: u64, ctx: &mut TxContext){
+    entry fun create_bond(name: vector<u8>, description: vector<u8>, funding_goal: u64, ctx: &mut TxContext){
         
         let creator = tx_context::sender(ctx); // Project creator(NGO / Government)
         let project_id = object::new(ctx); // Unique project ID

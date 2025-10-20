@@ -4,11 +4,38 @@ import (
 	"bluelink-backend/internal/config"
 	"bluelink-backend/internal/middleware"
 	"bluelink-backend/internal/routes"
-	"bluelink-backend/internal/sui"
+	"bluelink-backend/internal/services"
+	"bluelink-backend/internal/session"
 	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
+
+/*
+	請求進入
+	↓
+	1️⃣ RecoveryMiddleware()        ← 最外層：捕捉 panic
+	↓
+	2️⃣ RequestIDMiddleware()       ← 生成請求 ID
+	↓
+	3️⃣ LoggingMiddleware()         ← 記錄請求（使用 RequestID）
+	↓
+	4️⃣ CORSMiddleware()            ← 處理跨域（OPTIONS 請求在這裡結束）
+	↓
+	5️⃣ RateLimitMiddleware()       ← 限制請求頻率
+	↓
+	6️⃣ ErrorHandlerMiddleware()    ← 統一錯誤處理
+	↓
+	【路由匹配】
+	↓
+	【路由級別 Middleware】
+	↓
+	【Handler】
+	↓
+	響應返回（依序經過所有 Middleware）
+*/
 
 // setupGinEngine 設定 Gin 引擎和全域 middleware
 func setupGinEngine(config *config.Config) *gin.Engine {
@@ -17,22 +44,36 @@ func setupGinEngine(config *config.Config) *gin.Engine {
 	if config.Environment == "production" {
 		// 生產環境：完整的安全設定
 		gin.SetMode(gin.ReleaseMode)
-		r = gin.New()
+		r = gin.New() // 不使用 gin.Default()，手動配置
+
+		// ===== 全域 Middleware =====
 		r.Use(
-			middleware.RecoveryMiddleware(),     // 防止 panic 崩潰
-			middleware.RequestIDMiddleware(),    // 追蹤請求
-			middleware.LoggingMiddleware(),      // 記錄日誌
-			middleware.CORSMiddleware(),         // 跨域處理
-			middleware.RateLimitMiddleware(100), // 防止 DDoS（每分鐘 100 次）
-			middleware.ErrorHandlerMiddleware(), // 統一錯誤處理
+			// 最外層，捕捉所有 panic
+			middleware.RecoveryMiddleware(),
+
+			// 為每個請求分配唯一 ID
+			middleware.RequestIDMiddleware(),
+
+			// Logging - 記錄請求
+			middleware.LoggingMiddleware(),
+
+			// CORS - 處理跨域請求（OPTIONS 請求在這裡就返回）
+			middleware.CORSMiddleware(),
+
+			// RateLimit - 限制請求頻率
+			middleware.RateLimitMiddleware(100), // 每分鐘 100 次
+
+			// ErrorHandler - 統一錯誤格式
+			middleware.ErrorHandlerMiddleware(),
 		)
 	} else {
-		// 開發環境：包含彩色日誌
-		r = gin.Default()
+		// 開發環境：較寬鬆的設定
+		r = gin.Default() // 內建 Logger + Recovery
+
 		r.Use(
 			middleware.RequestIDMiddleware(),
 			middleware.CORSMiddleware(),
-			middleware.RateLimitMiddleware(200), // 開發環境較寬鬆
+			middleware.RateLimitMiddleware(1000), // 開發環境很寬鬆
 			middleware.ErrorHandlerMiddleware(),
 		)
 	}
@@ -68,35 +109,45 @@ func main() {
 	fmt.Println("Starting BlueLink Backend Application...")
 	fmt.Println(logo)
 
-	// Load environment variables from .env file
+	opts := &slog.HandlerOptions{
+		Level: slog.LevelDebug, // 設定日誌級別，只有高於或等於 Debug 的日誌會被記錄
+	}
+	handler := slog.NewJSONHandler(os.Stdout, opts)
+
+	slog.SetDefault(slog.New(handler))
+
+	// 載入設定
 	config := config.LoadConfig()
 
-	// Initialize Sui client
-	suiClient := sui.NewClient(config.SuiRPCURL)
-
-	// Setup Gin engine
+	// 設定 Gin engine
 	engine := setupGinEngine(config)
 
-	// TODO: Initialize database connection
-	// db, err := initDatabase(config)
-	// if err != nil {
-	//     log.Fatalf("Failed to initialize database: %v", err)
-	// }
-	// defer db.Close()
+	// TODO: Create databse initial function
+	// 初始化資料庫
+	db, err := initDatabase(config)
+	if err != nil {
+		slog.Error("Failed to initialize the database.", "error", err)
+	}
+	defer db.Close()
 
-	// TODO: Initialize services
-	// userService := services.NewUserService(db)
+	// 初始化服務層
+	userService := services.NewUserService(db)
+	bondService := services.NewBondService(db)
 
-	// Setup routes (暫時傳 nil 作為 userService，等資料庫設定完成後再更新)
-	routes.SetupRoutes(engine, suiClient, nil)
+	// 初始化 Session 管理器
+	sessionManager := session.NewMemorySessionManager()
 
-	// Start server
+	// 設定路由
+	routes.SetupRoutes(engine, userService, bondService, sessionManager)
+
+	// 啟動伺服器
 	port := config.Port
 	if port == "" {
 		port = "8080"
 	}
-	fmt.Printf("Server running on port %s\n", port)
+	slog.Info("Server starts running", "port", port)
+
 	if err := engine.Run(":" + port); err != nil {
-		fmt.Printf("Failed to run server: %v\n", err)
+		slog.Error("Failed to initialize the server.", "error", err)
 	}
 }

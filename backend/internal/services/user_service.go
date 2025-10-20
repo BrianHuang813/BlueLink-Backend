@@ -106,14 +106,13 @@ func (s *UserService) Create(walletAddress string) (*models.User, error) {
 }
 
 // Update 更新使用者資料
-func (s *UserService) Update(userID int64, name string) error {
+func (s *UserService) Update(name string) error {
 	query := `
 		UPDATE users 
-		SET name = $1, email = $2, updated_at = $3 
-		WHERE id = $4
+		SET name = $1
 	`
 
-	result, err := s.db.Exec(query, name, time.Now(), userID)
+	result, err := s.db.Exec(query, name, time.Now())
 	if err != nil {
 		return err
 	}

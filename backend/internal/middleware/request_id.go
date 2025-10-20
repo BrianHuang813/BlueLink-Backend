@@ -11,6 +11,8 @@ func RequestIDMiddleware() gin.HandlerFunc {
 		if requestID == "" {
 			requestID = uuid.New().String()
 		}
+
+		// 將 Request ID 加入回應標頭，並存入 Context 以便後續 Middleware 和 Handler 使用
 		c.Header("X-Request-ID", requestID)
 		c.Set("RequestID", requestID)
 		c.Next()
