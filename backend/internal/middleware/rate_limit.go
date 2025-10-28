@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"net/http"
+	"bluelink-backend/internal/models"
 	"sync"
 	"time"
 
@@ -46,12 +46,7 @@ func RateLimitMiddleware(requestsPerMinute int) gin.HandlerFunc {
 		if time.Since(v.lastSeen) < time.Minute {
 			if v.count >= requestsPerMinute {
 				mu.Unlock()
-				requestID, _ := c.Get("RequestID")
-				c.JSON(http.StatusTooManyRequests, gin.H{
-					"code":       http.StatusTooManyRequests,
-					"message":    "Too many requests, please try again later",
-					"request_id": requestID,
-				})
+				models.RespondTooManyRequests(c, "Too many requests, please try again later")
 				c.Abort()
 				return
 			}

@@ -33,40 +33,27 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	// 從 context 取得使用者資訊
 	walletAddress, err := utils.GetWalletAddress(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: err.Error(),
-		})
+		models.RespondUnauthorized(c, err.Error())
 		return
 	}
 
 	userID, err := utils.GetUserID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: err.Error(),
-		})
+		models.RespondUnauthorized(c, err.Error())
 		return
 	}
 
 	role, err := utils.GetUserRole(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: err.Error(),
-		})
+		models.RespondUnauthorized(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		http.StatusOK,
-		"Profile retrieved successfully",
-		gin.H{
-			"user_id": userID,
-			"wallet":  walletAddress,
-			"role":    role,
-		},
-	))
+	models.RespondWithSuccess(c, http.StatusOK, "Profile retrieved successfully", gin.H{
+		"user_id": userID,
+		"wallet":  walletAddress,
+		"role":    role,
+	})
 }
 
 // GetFullProfile 取得當前使用者的完整資料
@@ -74,28 +61,18 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 func (h *ProfileHandler) GetFullProfile(c *gin.Context) {
 	userID, err := utils.GetUserID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: err.Error(),
-		})
+		models.RespondUnauthorized(c, err.Error())
 		return
 	}
 
 	// 從資料庫載入完整使用者資料
-	user, err := h.userService.GetByID(userID)
+	user, err := h.userService.GetByID(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to get user profile",
-		})
+		models.RespondInternalError(c, "Failed to get user profile", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		http.StatusOK,
-		"Full profile retrieved successfully",
-		user,
-	))
+	models.RespondWithSuccess(c, http.StatusOK, "Full profile retrieved successfully", user)
 }
 
 // UpdateProfile 更新使用者資料
@@ -103,45 +80,31 @@ func (h *ProfileHandler) GetFullProfile(c *gin.Context) {
 func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 	userID, err := utils.GetUserID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: err.Error(),
-		})
+		models.RespondUnauthorized(c, err.Error())
 		return
 	}
 
 	var req UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponseWithDetails(
-			http.StatusBadRequest,
-			"Invalid request format",
-			err.Error(),
-		))
+		models.RespondBadRequest(c, "Invalid request format", err)
 		return
 	}
 
-	// 更新使用者資料(目前僅限姓名)
-	if err := h.userService.Update(req.Name); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to update profile",
-		})
-		return
-	}
-
-	// 取得更新後的資料
-	user, err := h.userService.GetByID(userID)
+	// 先取得現有使用者資料
+	user, err := h.userService.GetByID(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to get updated profile",
-		})
+		models.RespondNotFound(c, "User not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		http.StatusOK,
-		"Profile updated successfully",
-		user,
-	))
+	// 更新使用者名稱
+	user.Name = &req.Name
+
+	// 儲存更新
+	if err := h.userService.Update(c.Request.Context(), user); err != nil {
+		models.RespondInternalError(c, "Failed to update profile", err)
+		return
+	}
+
+	models.RespondWithSuccess(c, http.StatusOK, "Profile updated successfully", user)
 }

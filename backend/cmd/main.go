@@ -1,87 +1,28 @@
-package cmd
+package main
 
 import (
+	"bluelink-backend/internal/blockchain"
 	"bluelink-backend/internal/config"
+	"bluelink-backend/internal/database"
 	"bluelink-backend/internal/middleware"
+	"bluelink-backend/internal/repository"
 	"bluelink-backend/internal/routes"
 	"bluelink-backend/internal/services"
 	"bluelink-backend/internal/session"
+	"context"
 	"fmt"
-	"log/slog"
+	"log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/block-vision/sui-go-sdk/sui"
 	"github.com/gin-gonic/gin"
 )
 
-/*
-	請求進入
-	↓
-	1️⃣ RecoveryMiddleware()        ← 最外層：捕捉 panic
-	↓
-	2️⃣ RequestIDMiddleware()       ← 生成請求 ID
-	↓
-	3️⃣ LoggingMiddleware()         ← 記錄請求（使用 RequestID）
-	↓
-	4️⃣ CORSMiddleware()            ← 處理跨域（OPTIONS 請求在這裡結束）
-	↓
-	5️⃣ RateLimitMiddleware()       ← 限制請求頻率
-	↓
-	6️⃣ ErrorHandlerMiddleware()    ← 統一錯誤處理
-	↓
-	【路由匹配】
-	↓
-	【路由級別 Middleware】
-	↓
-	【Handler】
-	↓
-	響應返回（依序經過所有 Middleware）
-*/
-
-// setupGinEngine 設定 Gin 引擎和全域 middleware
-func setupGinEngine(config *config.Config) *gin.Engine {
-	var r *gin.Engine
-
-	if config.Environment == "production" {
-		// 生產環境：完整的安全設定
-		gin.SetMode(gin.ReleaseMode)
-		r = gin.New() // 不使用 gin.Default()，手動配置
-
-		// ===== 全域 Middleware =====
-		r.Use(
-			// 最外層，捕捉所有 panic
-			middleware.RecoveryMiddleware(),
-
-			// 為每個請求分配唯一 ID
-			middleware.RequestIDMiddleware(),
-
-			// Logging - 記錄請求
-			middleware.LoggingMiddleware(),
-
-			// CORS - 處理跨域請求（OPTIONS 請求在這裡就返回）
-			middleware.CORSMiddleware(),
-
-			// RateLimit - 限制請求頻率
-			middleware.RateLimitMiddleware(100), // 每分鐘 100 次
-
-			// ErrorHandler - 統一錯誤格式
-			middleware.ErrorHandlerMiddleware(),
-		)
-	} else {
-		// 開發環境：較寬鬆的設定
-		r = gin.Default() // 內建 Logger + Recovery
-
-		r.Use(
-			middleware.RequestIDMiddleware(),
-			middleware.CORSMiddleware(),
-			middleware.RateLimitMiddleware(1000), // 開發環境很寬鬆
-			middleware.ErrorHandlerMiddleware(),
-		)
-	}
-
-	return r
-}
-
 func main() {
+	// for local development initial logo
 	logo := `
           _____                    _____            _____                    _____                            _____            _____                    _____                    _____          
          /\    \                  /\    \          /\    \                  /\    \                          /\    \          /\    \                  /\    \                  /\    \         
@@ -104,50 +45,143 @@ func main() {
        \::::/    /              \:::\____\       \::::/    /              \:::\____\                       \:::\____\       \:::\____\                /:::/    /              \::|   |          
         \::/____/                \::/    /        \::/____/                \::/    /                        \::/    /        \::/    /                \::/    /                \:|   |          
          ~~                       \/____/          ~~                       \/____/                          \/____/          \/____/                  \/____/                  \|___|          
-                                                                                                                                                                                                
-`
-	fmt.Println("Starting BlueLink Backend Application...")
+	`
 	fmt.Println(logo)
+	fmt.Println("Starting BlueLink Backend Application...")
 
-	opts := &slog.HandlerOptions{
-		Level: slog.LevelDebug, // 設定日誌級別，只有高於或等於 Debug 的日誌會被記錄
+	// 1. 載入配置
+	cfg := config.LoadConfig()
+
+	// 2. 設定 Gin 模式
+	if cfg.Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
 	}
-	handler := slog.NewJSONHandler(os.Stdout, opts)
 
-	slog.SetDefault(slog.New(handler))
+	// 3. 連接資料庫
+	log.Println("Connecting to database...")
+	dbConfig := database.DBConfig{
+		Host:     cfg.DBHost,
+		Port:     cfg.DBPort,
+		User:     cfg.DBUser,
+		Password: cfg.DBPassword,
+		DBName:   cfg.DBName,
+		SSLMode:  cfg.DBSSLMode,
+	}
 
-	// 載入設定
-	config := config.LoadConfig()
-
-	// 設定 Gin engine
-	engine := setupGinEngine(config)
-
-	// TODO: Create databse initial function
-	// 初始化資料庫
-	db, err := initDatabase(config)
+	db, err := database.NewPostgresDB(dbConfig)
 	if err != nil {
-		slog.Error("Failed to initialize the database.", "error", err)
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
+	log.Println("Database connected")
 
-	// 初始化服務層
-	userService := services.NewUserService(db)
-	bondService := services.NewBondService(db)
+	// 4. 執行資料庫遷移（開發環境自動執行）
+	ctx := context.Background()
+	if cfg.Environment == "development" {
+		log.Println("Running database migrations...")
+		if err := db.Migrate(ctx); err != nil {
+			log.Printf("Migration warning: %v", err)
+		} else {
+			log.Println("Migrations completed")
+		}
+	}
 
-	// 初始化 Session 管理器
+	// 5. 初始化 Repositories
+	userRepo := repository.NewUserRepository(db.DB)
+	bondRepo := repository.NewBondRepository(db.DB)
+	txRepo := repository.NewTransactionRepository(db.DB)
+
+	// 6. 初始化 Services
+	userService := services.NewUserService(userRepo)
+	bondService := services.NewBondService(bondRepo)
+
+	// 7. 初始化 Session Manager
 	sessionManager := session.NewMemorySessionManager()
 
-	// 設定路由
-	routes.SetupRoutes(engine, userService, bondService, sessionManager)
+	// 8. 初始化 Sui Client
+	log.Println("🔄 Initializing Sui client...")
+	suiClient := sui.NewSuiClient(cfg.SuiRPCURL)
+	log.Println("✅ Sui client initialized")
 
-	// 啟動伺服器
-	port := config.Port
+	// 9. 初始化並啟動區塊鏈事件監聽器
+	if cfg.SuiPackageID != "" {
+		log.Println("Starting blockchain event listener...")
+		eventListener := blockchain.NewEventListener(
+			suiClient,
+			txRepo,
+			bondRepo,
+			userRepo,
+			cfg.SuiPackageID,
+		)
+
+		if err := eventListener.Start(ctx); err != nil {
+			log.Printf("Failed to start event listener: %v", err)
+		} else {
+			defer eventListener.Stop()
+			log.Println("Event listener started")
+		}
+	} else {
+		log.Println("SUI_PACKAGE_ID not set, skipping event listener")
+	}
+
+	// 10. 初始化 Gin Router
+	r := gin.Default()
+
+	// 11. 全域中間件
+	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.RecoveryMiddleware())
+	r.Use(middleware.RequestIDMiddleware())
+	r.Use(middleware.LoggingMiddleware())
+
+	// 12. 設定路由
+	routes.SetupRoutes(r, userService, bondService, sessionManager, cfg)
+
+	// 13. 健康檢查路由
+	r.GET("/health", func(c *gin.Context) {
+		if err := db.HealthCheck(ctx); err != nil {
+			c.JSON(500, gin.H{
+				"status":   "unhealthy",
+				"database": "disconnected",
+				"error":    err.Error(),
+			})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"status":   "healthy",
+			"database": "connected",
+			"sui":      "connected",
+			"version":  "1.0.0",
+		})
+	})
+
+	// 14. 啟動伺服器
+	port := cfg.Port
 	if port == "" {
-		port = "8080"
+		port = ":8080"
 	}
-	slog.Info("Server starts running", "port", port)
 
-	if err := engine.Run(":" + port); err != nil {
-		slog.Error("Failed to initialize the server.", "error", err)
-	}
+	log.Printf("Server starting on port %s", port)
+	log.Printf("Environment: %s", cfg.Environment)
+	log.Printf("Sui RPC: %s", cfg.SuiRPCURL)
+
+	// 15. 優雅關閉
+	go func() {
+		if err := r.Run(port); err != nil {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// 16. 等待中斷信號
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	<-shutdownCtx.Done()
+	log.Println("Server shutdown complete")
 }

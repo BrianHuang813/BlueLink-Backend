@@ -1,12 +1,15 @@
 package routes
 
 import (
+	"bluelink-backend/internal/config"
 	"bluelink-backend/internal/handlers/auth"
 	"bluelink-backend/internal/handlers/bonds"
 	"bluelink-backend/internal/handlers/users"
 	"bluelink-backend/internal/middleware"
+	"bluelink-backend/internal/models"
 	"bluelink-backend/internal/services"
 	"bluelink-backend/internal/session"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,9 +20,13 @@ func SetupRoutes(
 	userService *services.UserService,
 	bondService *services.BondService,
 	sessionManager *session.MemorySessionManager,
+	cfg *config.Config,
 ) {
+	// 判斷是否為生產環境
+	isProduction := cfg.Environment == "production"
+
 	// 初始化 handlers
-	authHandler := auth.NewAuthHandler(userService, sessionManager)
+	authHandler := auth.NewAuthHandler(userService, sessionManager, isProduction)
 	profileHandler := users.NewProfileHandler(userService)
 	bondHandler := bonds.NewBondHandler(bondService)
 
@@ -31,7 +38,9 @@ func SetupRoutes(
 	{
 		// 後端狀況確認
 		public.GET("/health", func(c *gin.Context) {
-			c.JSON(200, gin.H{"status": "ok"})
+			models.RespondWithSuccess(c, http.StatusOK, "Service is healthy", gin.H{
+				"status": "ok",
+			})
 		})
 	}
 
@@ -65,36 +74,35 @@ func SetupRoutes(
 	// ===== 3. 受保護路由（需要 Session）=====
 	protected := v1.Group("/")
 	protected.Use(
-		// 7️⃣ SessionAuth - 驗證 Cookie 中的 session_id
+		// SessionAuth - 驗證 Cookie 中的 session_id 並載入使用者資訊到 Context
 		middleware.SessionAuthMiddleware(sessionManager),
-
-		// 8️⃣ UserContext - 從 Session 載入使用者資訊到 Context
-		middleware.BasicUserContextMiddleware(sessionManager),
 	)
 	{
-		// 使用者相關
+		// User 相關
 		protected.GET("/profile", profileHandler.GetProfile)
 		protected.PUT("/profile", profileHandler.UpdateProfile)
 		protected.GET("/profile/full", profileHandler.GetFullProfile)
 
-		// Session 管理
-		protected.GET("/auth/sessions", authHandler.GetActiveSessions)
+		// Session 管理（有額外的速率限制）
+		sessionGroup := protected.Group("/sessions")
+		sessionGroup.Use(middleware.RateLimitMiddleware(30)) // 每分鐘 30 次
+		{
+			sessionGroup.GET("", authHandler.GetActiveSessions)            // 取得所有 session
+			sessionGroup.DELETE("/:session_id", authHandler.RevokeSession) // 撤銷特定 session
+		}
 
-		// 債券相關（之後實作）
-		protected.GET("/bonds", bondHandler.GetAllList)
-		// protected.POST("bonds/redeem", bondHandler.RedeemBond)
-		// protected.GET("bonds/owned", bondHandler.GetOwnedBonds)
+		// Bond 相關
+		protected.GET("/bonds", bondHandler.GetAllBonds)
 	}
 
 	// ===== 4. 管理員路由（需要 Session + 管理員權限）=====
 	admin := v1.Group("/admin")
 	admin.Use(
 		middleware.SessionAuthMiddleware(sessionManager),
-		middleware.BasicUserContextMiddleware(sessionManager),
 		middleware.RequireRoleMiddleware("admin"),
 	)
 	{
-		// 管理員功能（之後實作）
+		// TODO: 管理員功能路由
 		// admin.GET("/users", adminHandler.GetAllUsers)
 		// admin.PUT("/users/:id/role", adminHandler.UpdateUserRole)
 	}

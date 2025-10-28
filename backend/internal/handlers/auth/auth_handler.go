@@ -48,12 +48,12 @@ import (
    - 記錄 IP 和 UserAgent（審計追蹤）
 */
 
-var isProduction = false // TODO: 根據環境設定
 type AuthHandler struct {
 	userService    *services.UserService
 	sessionManager *session.MemorySessionManager
 	nonces         map[string]NonceData
 	mu             sync.RWMutex
+	isProduction   bool // 從配置讀取的環境標誌
 }
 
 type NonceData struct {
@@ -83,11 +83,12 @@ type VerifyResponse struct {
 	ExpiresAt     int64        `json:"expires_at"`
 }
 
-func NewAuthHandler(userService *services.UserService, sessionManager *session.MemorySessionManager) *AuthHandler {
+func NewAuthHandler(userService *services.UserService, sessionManager *session.MemorySessionManager, isProduction bool) *AuthHandler {
 	handler := &AuthHandler{
 		userService:    userService,
 		sessionManager: sessionManager,
 		nonces:         make(map[string]NonceData),
+		isProduction:   isProduction,
 	}
 
 	// 啟動清理協程
@@ -101,21 +102,14 @@ func NewAuthHandler(userService *services.UserService, sessionManager *session.M
 func (h *AuthHandler) GenerateChallenge(c *gin.Context) {
 	var req ChallengeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponseWithDetails(
-			http.StatusBadRequest,
-			"Invalid request format",
-			err.Error(),
-		))
+		models.RespondBadRequest(c, "Invalid request format", err)
 		return
 	}
 
 	// 生成隨機 nonce
 	nonceBytes := make([]byte, 32)
 	if _, err := rand.Read(nonceBytes); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to generate nonce",
-		})
+		models.RespondInternalError(c, "Failed to generate nonce", err)
 		return
 	}
 	nonce := base64.URLEncoding.EncodeToString(nonceBytes)
@@ -143,11 +137,7 @@ func (h *AuthHandler) GenerateChallenge(c *gin.Context) {
 func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	var req VerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponseWithDetails(
-			http.StatusBadRequest,
-			"Invalid request format",
-			err.Error(),
-		))
+		models.RespondBadRequest(c, "Invalid request format", err)
 		return
 	}
 
@@ -158,19 +148,13 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	h.mu.RUnlock()
 
 	if !exists {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: "Nonce not found or expired",
-		})
+		models.RespondUnauthorized(c, "Nonce not found or expired")
 		return
 	}
 
 	// 檢查 nonce 是否匹配
 	if nonceData.Nonce != req.Nonce {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: "Invalid nonce",
-		})
+		models.RespondUnauthorized(c, "Invalid nonce")
 		return
 	}
 
@@ -180,10 +164,7 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		delete(h.nonces, key)
 		h.mu.Unlock()
 
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: "Nonce expired",
-		})
+		models.RespondUnauthorized(c, "Nonce expired")
 		return
 	}
 
@@ -191,21 +172,15 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	message := fmt.Sprintf("Sign in to BlueLink\nNonce: %s", req.Nonce)
 	isValid, signerAddress, err := h.verifySuiSignature(req.Signature, message)
 	if err != nil || !isValid {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponseWithDetails(
-			http.StatusUnauthorized,
-			"Invalid signature",
-			fmt.Sprintf("Verification failed: %v", err),
-		))
+		models.RespondWithErrorDetails(c, http.StatusUnauthorized, "Invalid signature",
+			fmt.Sprintf("Verification failed: %v", err))
 		return
 	}
 
 	// 3. 驗證簽名者地址是否與提供的地址匹配
 	if signerAddress != req.WalletAddress {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code: http.StatusUnauthorized,
-			Message: fmt.Sprintf("Address mismatch: provided %s, signed by %s",
-				req.WalletAddress, signerAddress),
-		})
+		models.RespondWithErrorDetails(c, http.StatusUnauthorized, "Address mismatch",
+			fmt.Sprintf("Provided %s, signed by %s", req.WalletAddress, signerAddress))
 		return
 	}
 
@@ -215,15 +190,12 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	h.mu.Unlock()
 
 	// 5. 取得或建立使用者
-	user, err := h.userService.GetByWalletAddress(req.WalletAddress)
+	user, err := h.userService.GetByWalletAddress(c.Request.Context(), req.WalletAddress)
 	if err != nil {
 		// 使用者不存在，建立新使用者
-		user, err = h.userService.Create(req.WalletAddress)
+		user, err = h.userService.Create(c.Request.Context(), req.WalletAddress)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-				Code:    http.StatusInternalServerError,
-				Message: "Failed to create user",
-			})
+			models.RespondInternalError(c, "Failed to create user", err)
 			return
 		}
 	}
@@ -238,10 +210,7 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to create session",
-		})
+		models.RespondInternalError(c, "Failed to create session", err)
 		return
 	}
 
@@ -252,23 +221,19 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		Path:     "/",
 		Domain:   "",
 		MaxAge:   int(24 * time.Hour.Seconds()),
-		Secure:   isProduction,
+		Secure:   h.isProduction,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	}
 	http.SetCookie(c.Writer, cookie)
 
 	// 8. 回傳成功響應
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		http.StatusOK,
-		"Authentication successful",
-		VerifyResponse{
-			SessionID:     sess.ID,
-			WalletAddress: req.WalletAddress,
-			User:          user,
-			ExpiresAt:     sess.CreatedAt.Add(24 * time.Hour).Unix(),
-		},
-	))
+	models.RespondWithSuccess(c, http.StatusOK, "Authentication successful", VerifyResponse{
+		SessionID:     sess.ID,
+		WalletAddress: req.WalletAddress,
+		User:          user,
+		ExpiresAt:     sess.CreatedAt.Add(24 * time.Hour).Unix(),
+	})
 }
 
 // Logout 登出當前會話
@@ -276,31 +241,20 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	sessionID, exists := c.Get("SessionID")
 	if !exists {
-		c.JSON(http.StatusOK, models.SuccessResponse(
-			http.StatusOK,
-			"Already logged out",
-			nil,
-		))
+		models.RespondWithSuccess(c, http.StatusOK, "Already logged out", nil)
 		return
 	}
 
 	// 刪除 session
 	if err := h.sessionManager.Delete(sessionID.(string)); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to logout",
-		})
+		models.RespondInternalError(c, "Failed to logout", err)
 		return
 	}
 
 	// 清除 Cookie
 	c.SetCookie("session_id", "", -1, "/", "", true, true)
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		http.StatusOK,
-		"Logged out successfully",
-		nil,
-	))
+	models.RespondWithSuccess(c, http.StatusOK, "Logged out successfully", nil)
 }
 
 // LogoutAll 登出所有裝置
@@ -308,58 +262,74 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) LogoutAll(c *gin.Context) {
 	walletAddress, exists := c.Get("WalletAddress")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: "Unauthorized",
-		})
+		models.RespondUnauthorized(c, "Unauthorized")
 		return
 	}
 
 	// 刪除所有 session
 	if err := h.sessionManager.DeleteAllUserSessions(walletAddress.(string)); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to logout all sessions",
-		})
+		models.RespondInternalError(c, "Failed to logout all sessions", err)
 		return
 	}
 
 	// 清除當前 Cookie
 	c.SetCookie("session_id", "", -1, "/", "", true, true)
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		http.StatusOK,
-		"Logged out from all devices",
-		nil,
-	))
+	models.RespondWithSuccess(c, http.StatusOK, "Logged out from all devices", nil)
 }
 
-// GetActiveSessions 取得所有活躍會話
-// GET /api/v1/auth/sessions
+// GetActiveSessions 取得使用者的所有活躍會話
+// GET /api/v1/sessions
 func (h *AuthHandler) GetActiveSessions(c *gin.Context) {
 	walletAddress, exists := c.Get("WalletAddress")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
-			Code:    http.StatusUnauthorized,
-			Message: "Unauthorized",
-		})
+		models.RespondUnauthorized(c, "Unauthorized")
 		return
 	}
 
 	sessions, err := h.sessionManager.GetUserSessions(walletAddress.(string))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to get sessions",
-		})
+		models.RespondInternalError(c, "Failed to get sessions", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		http.StatusOK,
-		"Sessions retrieved successfully",
-		sessions,
-	))
+	models.RespondWithSuccess(c, http.StatusOK, "Sessions retrieved successfully", sessions)
+}
+
+// RevokeSession 撤銷指定的會話
+// DELETE /api/v1/sessions/:session_id
+func (h *AuthHandler) RevokeSession(c *gin.Context) {
+	sessionIDToRevoke := c.Param("session_id")
+	if sessionIDToRevoke == "" {
+		models.RespondBadRequest(c, "Session ID is required", nil)
+		return
+	}
+
+	walletAddress, exists := c.Get("WalletAddress")
+	if !exists {
+		models.RespondUnauthorized(c, "Unauthorized")
+		return
+	}
+
+	// 驗證該 session 是否屬於當前使用者
+	session, err := h.sessionManager.Get(sessionIDToRevoke)
+	if err != nil || session == nil {
+		models.RespondNotFound(c, "Session not found")
+		return
+	}
+
+	if session.WalletAddress != walletAddress.(string) {
+		models.RespondForbidden(c, "Cannot revoke another user's session")
+		return
+	}
+
+	// 刪除 session
+	if err := h.sessionManager.Delete(sessionIDToRevoke); err != nil {
+		models.RespondInternalError(c, "Failed to revoke session", err)
+		return
+	}
+
+	models.RespondWithSuccess(c, http.StatusOK, "Session revoked successfully", nil)
 }
 
 // verifySuiSignature 使用 SDK 的 verify 套件驗證 Sui 簽名

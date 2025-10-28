@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"net/http"
+	"bluelink-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -11,10 +11,7 @@ func RequireRoleMiddleware(role string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userRole, exists := c.Get("Role")
 		if !exists || userRole != role {
-			c.JSON(http.StatusForbidden, gin.H{
-				"code":    http.StatusForbidden,
-				"message": "Forbidden: insufficient permissions",
-			})
+			models.RespondForbidden(c, "Forbidden: insufficient permissions")
 			c.Abort()
 			return
 		}

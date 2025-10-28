@@ -15,7 +15,8 @@ type Config struct {
 	Port        string // "8080"
 
 	// Sui 區塊鏈設定
-	SuiRPCURL string
+	SuiRPCURL    string
+	SuiPackageID string // 合約 Package ID
 
 	// 資料庫設定
 	DatabaseURL string // "postgres://..."
@@ -24,6 +25,7 @@ type Config struct {
 	DBUser      string
 	DBPassword  string
 	DBName      string
+	DBSSLMode   string
 
 	// JWT/Session 設定
 	JWTSecret      string
@@ -47,15 +49,17 @@ func LoadConfig() *Config {
 		Port:        getEnv("PORT", ":8080"),
 
 		// Sui 設定
-		SuiRPCURL: getEnv("SUI_RPC_URL", "https://fullnode.testnet.sui.io:443"),
+		SuiRPCURL:    getEnv("SUI_RPC_URL", "https://fullnode.testnet.sui.io:443"),
+		SuiPackageID: getEnv("SUI_PACKAGE_ID", ""), // 合約部署後設定
 
 		// 資料庫設定
-		// DatabaseURL: getEnv("DATABASE_URL", ""),
-		// DBHost:      getEnv("DB_HOST", "localhost"),
-		// DBPort:      getEnv("DB_PORT", "5432"),
-		// DBUser:      getEnv("DB_USER", "postgres"),
-		// DBPassword:  getEnv("DB_PASSWORD", ""),
-		// DBName:      getEnv("DB_NAME", "bluelink"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
+		DBHost:      getEnv("DB_HOST", "localhost"),
+		DBPort:      getEnv("DB_PORT", "5432"),
+		DBUser:      getEnv("DB_USER", "postgres"),
+		DBPassword:  getEnv("DB_PASSWORD", ""),
+		DBName:      getEnv("DB_NAME", "bluelink"),
+		DBSSLMode:   getEnv("DB_SSL_MODE", "disable"), // AWS RDS 使用 "require"
 
 		// 安全設定
 		JWTSecret:      getEnv("JWT_SECRET", "your-secret-key-change-in-production"),

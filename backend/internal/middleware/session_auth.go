@@ -1,8 +1,8 @@
 package middleware
 
 import (
+	"bluelink-backend/internal/models"
 	"bluelink-backend/internal/session"
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -46,20 +46,14 @@ func SessionAuthMiddleware(sessionManager *session.MemorySessionManager) gin.Han
 	return func(c *gin.Context) {
 		sessionID := getSessionID(c)
 		if sessionID == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    http.StatusUnauthorized,
-				"message": "Missing session",
-			})
+			models.RespondUnauthorized(c, "Missing session")
 			c.Abort()
 			return
 		}
 
 		sess, err := sessionManager.Get(sessionID)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    http.StatusUnauthorized,
-				"message": "Invalid or expired session",
-			})
+			models.RespondUnauthorized(c, "Invalid or expired session")
 			c.Abort()
 			return
 		}
@@ -67,10 +61,11 @@ func SessionAuthMiddleware(sessionManager *session.MemorySessionManager) gin.Han
 		// 更新活躍時間
 		sessionManager.Touch(sessionID)
 
-		// 存入 context
+		// 存入 context (包含所有需要的使用者資訊)
 		c.Set("SessionID", sessionID)
 		c.Set("WalletAddress", sess.WalletAddress)
 		c.Set("UserID", sess.UserID)
+		c.Set("Role", sess.Role)
 
 		c.Next()
 	}
