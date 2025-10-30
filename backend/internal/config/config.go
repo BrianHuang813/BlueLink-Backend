@@ -57,7 +57,7 @@ func LoadConfig() *Config {
 
 	config := &Config{
 		Environment: environment,
-		Port:        getEnv("PORT", "8080"),
+		Port:        ":" + getEnv("PORT", "8080"), // 加上冒號
 
 		// Sui 設定
 		SuiRPCURL:    getEnv("SUI_RPC_URL", "https://fullnode.testnet.sui.io:443"),
