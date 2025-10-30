@@ -42,7 +42,7 @@ import (
 */
 
 // SessionAuthMiddleware 驗證 Session
-func SessionAuthMiddleware(sessionManager *session.MemorySessionManager) gin.HandlerFunc {
+func SessionAuthMiddleware(sessionManager session.SessionManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := getSessionID(c)
 		if sessionID == "" {

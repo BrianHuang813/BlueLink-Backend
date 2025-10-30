@@ -19,7 +19,8 @@ func SetupRoutes(
 	r *gin.Engine,
 	userService *services.UserService,
 	bondService *services.BondService,
-	sessionManager *session.MemorySessionManager,
+	bondTokenService *services.BondTokenService,
+	sessionManager session.SessionManager,
 	cfg *config.Config,
 ) {
 	// 判斷是否為生產環境
@@ -28,7 +29,7 @@ func SetupRoutes(
 	// 初始化 handlers
 	authHandler := auth.NewAuthHandler(userService, sessionManager, isProduction)
 	profileHandler := users.NewProfileHandler(userService)
-	bondHandler := bonds.NewBondHandler(bondService)
+	bondHandler := bonds.NewBondHandler(bondService, bondTokenService)
 
 	// API v1
 	v1 := r.Group("/api/v1")
@@ -93,6 +94,13 @@ func SetupRoutes(
 
 		// Bond 相關
 		protected.GET("/bonds", bondHandler.GetAllBonds)
+		protected.GET("/bonds/:id", bondHandler.GetBondByID)
+
+		// 🆕 BondToken 相關
+		protected.GET("/bond-tokens/:id", bondHandler.GetBondTokenByID)
+		protected.GET("/bond-tokens/on-chain/:on_chain_id", bondHandler.GetBondTokenByOnChainID)
+		protected.GET("/bond-tokens/owner", bondHandler.GetBondTokensByOwner)     // Query: ?owner=0x...&limit=10&offset=0
+		protected.GET("/bond-tokens/project", bondHandler.GetBondTokensByProject) // Query: ?project_id=0x...&limit=10&offset=0
 	}
 
 	// ===== 4. 管理員路由（需要 Session + 管理員權限）=====

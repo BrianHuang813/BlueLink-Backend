@@ -13,6 +13,11 @@ type Bond struct {
 	IssuerName    string `json:"issuer_name" db:"issuer_name"`       // 對應合約的 issuer_name
 	BondName      string `json:"bond_name" db:"bond_name"`           // 對應合約的 bond_name
 
+	// 🆕 圖片和元數據 URL
+	BondImageUrl  string `json:"bond_image_url" db:"bond_image_url"`   // 專案展示圖片 URL
+	TokenImageUrl string `json:"token_image_url" db:"token_image_url"` // NFT 代幣圖片 URL
+	MetadataUrl   string `json:"metadata_url" db:"metadata_url"`       // 完整元數據 URL (Arweave)
+
 	// 金額相關（使用 int64 對應 u64，單位：MIST，1 SUI = 1,000,000,000 MIST）
 	TotalAmount    int64 `json:"total_amount" db:"total_amount"`       // 對應 total_amount (募集總額度)
 	AmountRaised   int64 `json:"amount_raised" db:"amount_raised"`     // 對應 amount_raised (已募集金額)

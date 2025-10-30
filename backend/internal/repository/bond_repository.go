@@ -21,13 +21,14 @@ func (r *BondRepository) Create(ctx context.Context, bond *models.Bond) error {
 	query := `
 		INSERT INTO bonds (
 			on_chain_id, issuer_address, issuer_name, bond_name,
+			bond_image_url, token_image_url, metadata_url,
 			total_amount, amount_raised, amount_redeemed,
 			tokens_issued, tokens_redeemed,
 			annual_interest_rate, maturity_date, issue_date,
 			active, redeemable,
 			raised_funds_balance, redemption_pool_balance,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		RETURNING id, created_at, updated_at
 	`
 
@@ -38,6 +39,9 @@ func (r *BondRepository) Create(ctx context.Context, bond *models.Bond) error {
 		bond.IssuerAddress,
 		bond.IssuerName,
 		bond.BondName,
+		bond.BondImageUrl,
+		bond.TokenImageUrl,
+		bond.MetadataUrl,
 		bond.TotalAmount,
 		bond.AmountRaised,
 		bond.AmountRedeemed,
@@ -67,6 +71,7 @@ func (r *BondRepository) GetByID(ctx context.Context, id int64) (*models.Bond, e
 
 	query := `
 		SELECT id, on_chain_id, issuer_address, issuer_name, bond_name,
+		       bond_image_url, token_image_url, metadata_url,
 		       total_amount, amount_raised, amount_redeemed,
 		       tokens_issued, tokens_redeemed,
 		       annual_interest_rate, maturity_date, issue_date,
@@ -83,6 +88,9 @@ func (r *BondRepository) GetByID(ctx context.Context, id int64) (*models.Bond, e
 		&bond.IssuerAddress,
 		&bond.IssuerName,
 		&bond.BondName,
+		&bond.BondImageUrl,
+		&bond.TokenImageUrl,
+		&bond.MetadataUrl,
 		&bond.TotalAmount,
 		&bond.AmountRaised,
 		&bond.AmountRedeemed,
@@ -116,6 +124,7 @@ func (r *BondRepository) GetByOnChainID(ctx context.Context, onChainID string) (
 
 	query := `
 		SELECT id, on_chain_id, issuer_address, issuer_name, bond_name,
+		       bond_image_url, token_image_url, metadata_url,
 		       total_amount, amount_raised, amount_redeemed,
 		       tokens_issued, tokens_redeemed,
 		       annual_interest_rate, maturity_date, issue_date,
@@ -132,6 +141,9 @@ func (r *BondRepository) GetByOnChainID(ctx context.Context, onChainID string) (
 		&bond.IssuerAddress,
 		&bond.IssuerName,
 		&bond.BondName,
+		&bond.BondImageUrl,
+		&bond.TokenImageUrl,
+		&bond.MetadataUrl,
 		&bond.TotalAmount,
 		&bond.AmountRaised,
 		&bond.AmountRedeemed,
@@ -163,6 +175,7 @@ func (r *BondRepository) GetByOnChainID(ctx context.Context, onChainID string) (
 func (r *BondRepository) List(ctx context.Context, limit, offset int) ([]*models.Bond, error) {
 	query := `
 		SELECT id, on_chain_id, issuer_address, issuer_name, bond_name,
+		       bond_image_url, token_image_url, metadata_url,
 		       total_amount, amount_raised, amount_redeemed,
 		       tokens_issued, tokens_redeemed,
 		       annual_interest_rate, maturity_date, issue_date,
@@ -191,6 +204,9 @@ func (r *BondRepository) List(ctx context.Context, limit, offset int) ([]*models
 			&bond.IssuerAddress,
 			&bond.IssuerName,
 			&bond.BondName,
+			&bond.BondImageUrl,
+			&bond.TokenImageUrl,
+			&bond.MetadataUrl,
 			&bond.TotalAmount,
 			&bond.AmountRaised,
 			&bond.AmountRedeemed,

@@ -185,6 +185,67 @@ func GetMigrations() []Migration {
 			`,
 			Down: `DROP TABLE IF EXISTS schema_migrations;`,
 		},
+		{
+			Version:     7,
+			Description: "Add image and metadata URLs to bonds table",
+			Up: `
+				ALTER TABLE bonds
+				ADD COLUMN IF NOT EXISTS bond_image_url VARCHAR(500),
+				ADD COLUMN IF NOT EXISTS token_image_url VARCHAR(500),
+				ADD COLUMN IF NOT EXISTS metadata_url VARCHAR(500);
+
+				CREATE INDEX IF NOT EXISTS idx_bonds_bond_image_url ON bonds(bond_image_url);
+				CREATE INDEX IF NOT EXISTS idx_bonds_token_image_url ON bonds(token_image_url);
+			`,
+			Down: `
+				DROP INDEX IF EXISTS idx_bonds_bond_image_url;
+				DROP INDEX IF EXISTS idx_bonds_token_image_url;
+				ALTER TABLE bonds
+				DROP COLUMN IF EXISTS bond_image_url,
+				DROP COLUMN IF EXISTS token_image_url,
+				DROP COLUMN IF EXISTS metadata_url;
+			`,
+		},
+		{
+			Version:     8,
+			Description: "Create bond_tokens table",
+			Up: `
+				CREATE TABLE IF NOT EXISTS bond_tokens (
+					id BIGSERIAL PRIMARY KEY,
+					on_chain_id VARCHAR(66) UNIQUE NOT NULL,
+					
+					-- 專案關聯
+					project_id VARCHAR(66) NOT NULL,
+					
+					-- 🆕 代幣自包含資訊（從 BondProject 複製而來）
+					bond_name VARCHAR(255) NOT NULL,
+					token_image_url VARCHAR(500) NOT NULL,
+					maturity_date BIGINT NOT NULL,
+					annual_interest_rate BIGINT NOT NULL,
+					
+					-- 代幣資訊
+					token_number BIGINT NOT NULL,
+					owner VARCHAR(66) NOT NULL,
+					amount BIGINT NOT NULL,
+					purchase_date BIGINT NOT NULL,
+					is_redeemed BOOLEAN NOT NULL DEFAULT false,
+					
+					-- 資料庫管理欄位
+					created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					deleted_at TIMESTAMP
+				);
+
+				CREATE INDEX IF NOT EXISTS idx_bond_tokens_on_chain_id ON bond_tokens(on_chain_id);
+				CREATE INDEX IF NOT EXISTS idx_bond_tokens_project_id ON bond_tokens(project_id);
+				CREATE INDEX IF NOT EXISTS idx_bond_tokens_owner ON bond_tokens(owner);
+				CREATE INDEX IF NOT EXISTS idx_bond_tokens_token_number ON bond_tokens(token_number);
+				CREATE INDEX IF NOT EXISTS idx_bond_tokens_maturity_date ON bond_tokens(maturity_date);
+				CREATE INDEX IF NOT EXISTS idx_bond_tokens_is_redeemed ON bond_tokens(is_redeemed);
+				CREATE INDEX IF NOT EXISTS idx_bond_tokens_deleted_at ON bond_tokens(deleted_at);
+			`,
+			Down: `DROP TABLE IF EXISTS bond_tokens;`,
+		},
 	}
 }
 

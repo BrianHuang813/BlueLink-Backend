@@ -50,7 +50,7 @@ import (
 
 type AuthHandler struct {
 	userService    *services.UserService
-	sessionManager *session.MemorySessionManager
+	sessionManager session.SessionManager
 	nonces         map[string]NonceData
 	mu             sync.RWMutex
 	isProduction   bool // 從配置讀取的環境標誌
@@ -83,7 +83,7 @@ type VerifyResponse struct {
 	ExpiresAt     int64        `json:"expires_at"`
 }
 
-func NewAuthHandler(userService *services.UserService, sessionManager *session.MemorySessionManager, isProduction bool) *AuthHandler {
+func NewAuthHandler(userService *services.UserService, sessionManager session.SessionManager, isProduction bool) *AuthHandler {
 	handler := &AuthHandler{
 		userService:    userService,
 		sessionManager: sessionManager,

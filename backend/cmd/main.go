@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,7 +23,6 @@ import (
 )
 
 func main() {
-	// for local development initial logo
 	logo := `
           _____                    _____            _____                    _____                            _____            _____                    _____                    _____          
          /\    \                  /\    \          /\    \                  /\    \                          /\    \          /\    \                  /\    \                  /\    \         
@@ -89,19 +89,23 @@ func main() {
 	// 5. 初始化 Repositories
 	userRepo := repository.NewUserRepository(db.DB)
 	bondRepo := repository.NewBondRepository(db.DB)
+	bondTokenRepo := repository.NewBondTokenRepository(db.DB)
 	txRepo := repository.NewTransactionRepository(db.DB)
+	sessionRepo := repository.NewSessionRepository(db.DB)
 
 	// 6. 初始化 Services
 	userService := services.NewUserService(userRepo)
 	bondService := services.NewBondService(bondRepo)
+	bondTokenService := services.NewBondTokenService(bondTokenRepo)
 
-	// 7. 初始化 Session Manager
-	sessionManager := session.NewMemorySessionManager()
+	// 7. 初始化 Session Manager（使用 PostgreSQL）
+	sessionManager := session.NewPostgresSessionManager(sessionRepo)
+	log.Println("✅ Using PostgreSQL Session Manager (persistent sessions)")
 
 	// 8. 初始化 Sui Client
-	log.Println("🔄 Initializing Sui client...")
+	log.Println("Initializing Sui client...")
 	suiClient := sui.NewSuiClient(cfg.SuiRPCURL)
-	log.Println("✅ Sui client initialized")
+	log.Println("Sui client initialized")
 
 	// 9. 初始化並啟動區塊鏈事件監聽器
 	if cfg.SuiPackageID != "" {
@@ -134,7 +138,7 @@ func main() {
 	r.Use(middleware.LoggingMiddleware())
 
 	// 12. 設定路由
-	routes.SetupRoutes(r, userService, bondService, sessionManager, cfg)
+	routes.SetupRoutes(r, userService, bondService, bondTokenService, sessionManager, cfg)
 
 	// 13. 健康檢查路由
 	r.GET("/health", func(c *gin.Context) {
@@ -155,33 +159,50 @@ func main() {
 		})
 	})
 
-	// 14. 啟動伺服器
-	port := cfg.Port
-	if port == "" {
-		port = ":8080"
+	// 14. 建立 HTTP Server（使用原生 net/http 以支援優雅關閉）
+	srv := &http.Server{
+		Addr:           cfg.Port,
+		Handler:        r,
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1 MB
 	}
 
-	log.Printf("Server starting on port %s", port)
+	log.Printf("Server starting on port %s", cfg.Port)
 	log.Printf("Environment: %s", cfg.Environment)
 	log.Printf("Sui RPC: %s", cfg.SuiRPCURL)
+	log.Printf("Database: %s@%s:%s/%s", cfg.DBUser, cfg.DBHost, cfg.DBPort, cfg.DBName)
 
-	// 15. 優雅關閉
+	// 15. 在 goroutine 中啟動伺服器
 	go func() {
-		if err := r.Run(port); err != nil {
+		log.Printf("Server is ready and listening on %s", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
 
-	// 16. 等待中斷信號
+	// 16. 等待中斷信號（優雅關閉）
 	quit := make(chan os.Signal, 1)
+	// 監聽 SIGINT (Ctrl+C) 和 SIGTERM (kill)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
 
-	log.Println("Shutting down server...")
+	// 阻塞直到收到信號
+	sig := <-quit
+	log.Printf("\nReceived signal: %v", sig)
+	log.Println("Initiating graceful shutdown...")
 
+	// 17. 建立關閉 context（5 秒超時）
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	<-shutdownCtx.Done()
-	log.Println("Server shutdown complete")
+	// 18. 優雅地關閉伺服器
+	// Shutdown 會：
+	// 1. 停止接收新請求
+	// 2. 等待現有請求完成（最多等待 5 秒）
+	// 3. 關閉所有連線
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server gracefully stopped")
 }
