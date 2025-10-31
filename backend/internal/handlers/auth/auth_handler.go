@@ -132,19 +132,25 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	// Verify 方法會自動檢查過期、比對 nonce、並在驗證成功後刪除（防止重放攻擊）
 	isValid, err := h.nonceRepo.Verify(c.Request.Context(), req.WalletAddress, req.Nonce)
 	if err != nil || !isValid {
+		// 記錄詳細錯誤
+		fmt.Printf("[NONCE ERROR] wallet=%s, error=%v\n", req.WalletAddress, err)
 		models.RespondUnauthorized(c, fmt.Sprintf("Nonce verification failed: %v", err))
 		return
 	}
+	fmt.Printf("[NONCE OK] wallet=%s verified successfully\n", req.WalletAddress)
 
 	// 2. 驗證 Sui 簽名
 	// 構建相同的 message，確保與 challenge 時的格式一致
 	message := fmt.Sprintf("Sign in to BlueLink\nNonce: %s", req.Nonce)
+	fmt.Printf("[SIG VERIFY] message=%s, signature_len=%d\n", message, len(req.Signature))
 	isSigValid, signerAddress, err := h.verifySuiSignature(req.Signature, message)
 	if err != nil || !isSigValid {
+		fmt.Printf("[SIG ERROR] error=%v, valid=%v\n", err, isSigValid)
 		models.RespondWithErrorDetails(c, http.StatusUnauthorized, "Invalid signature",
 			fmt.Sprintf("Verification failed: %v", err))
 		return
 	}
+	fmt.Printf("[SIG OK] signer=%s\n", signerAddress)
 
 	// 3. 驗證簽名者地址是否與提供的地址匹配
 	if signerAddress != req.WalletAddress {
@@ -163,14 +169,18 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 			role = "buyer" // 預設角色
 		}
 
+		fmt.Printf("[USER CREATE] wallet=%s, role=%s\n", req.WalletAddress, role)
 		user, err = h.userService.CreateWithRole(c.Request.Context(), req.WalletAddress, role)
 		if err != nil {
+			fmt.Printf("[USER ERROR] failed to create user: %v\n", err)
 			models.RespondInternalError(c, "Failed to create user", err)
 			return
 		}
 	}
+	fmt.Printf("[USER OK] user_id=%d, wallet=%s\n", user.ID, user.WalletAddress)
 
 	// 6. 建立 session
+	fmt.Printf("[SESSION CREATE] user_id=%d, wallet=%s\n", user.ID, req.WalletAddress)
 	sess, err := h.sessionManager.Create(
 		user.ID,
 		req.WalletAddress,
@@ -180,9 +190,11 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
+		fmt.Printf("[SESSION ERROR] failed to create session: %v\n", err)
 		models.RespondInternalError(c, "Failed to create session", err)
 		return
 	}
+	fmt.Printf("[SESSION OK] session_id=%s\n", sess.ID)
 
 	// 7. 設定 HttpOnly Cookie
 	cookie := &http.Cookie{
