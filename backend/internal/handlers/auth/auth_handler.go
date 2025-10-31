@@ -143,7 +143,7 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		models.RespondInternalError(c, "Nonce repository not initialized", fmt.Errorf("nonceRepo is nil"))
 		return
 	}
-	
+
 	var req VerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		models.RespondBadRequest(c, "Invalid request format", err)
@@ -198,7 +198,7 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 			models.RespondInternalError(c, "Failed to create user", err)
 			return
 		}
-		
+
 		// 確保 user 不是 nil
 		if user == nil {
 			fmt.Printf("[USER ERROR] user is nil after creation\n")
@@ -206,14 +206,14 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 			return
 		}
 	}
-	
+
 	// 額外的安全檢查：確保 user 不是 nil
 	if user == nil {
 		fmt.Printf("[USER ERROR] user is nil after get/create\n")
 		models.RespondInternalError(c, "User data is invalid", fmt.Errorf("user is nil"))
 		return
 	}
-	
+
 	fmt.Printf("[USER OK] user_id=%d, wallet=%s\n", user.ID, user.WalletAddress)
 
 	// 6. 建立 session
@@ -358,7 +358,7 @@ func (h *AuthHandler) verifySuiSignature(signatureB64, message string) (bool, st
 	// 1. message: 原始訊息字符串(不需要 base64 編碼)
 	// 2. signature: base64 編碼的序列化簽名 [flag_byte][signature_bytes][pubkey_bytes]
 	// 返回: (signer_address, pass, error)
-	
+
 	signerAddress, pass, err := suiModels.VerifyPersonalMessage(message, signatureB64)
 	if err != nil {
 		return false, "", fmt.Errorf("signature verification failed: %w", err)
