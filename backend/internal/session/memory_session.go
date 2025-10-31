@@ -1,11 +1,11 @@
 package session
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type MemorySessionManager struct {
@@ -194,9 +194,6 @@ func (m *MemorySessionManager) cleanup() {
 }
 
 func generateSecureID() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.URLEncoding.EncodeToString(b), nil
+	// 使用 UUID v4 生成 session ID (36 個字符,符合數據庫 VARCHAR(36) 定義)
+	return uuid.New().String(), nil
 }
