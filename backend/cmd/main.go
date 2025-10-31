@@ -52,7 +52,7 @@ func main() {
 	defer db.Close()
 	log.Println("Database connected")
 
-	// 4. 執行資料庫遷移（開發環境自動執行）
+	// 4. 執行資料庫遷移（開發環境）
 	ctx := context.Background()
 	if cfg.Environment == "development" {
 		log.Println("Running database migrations...")
@@ -69,6 +69,7 @@ func main() {
 	bondTokenRepo := repository.NewBondTokenRepository(db.DB)
 	txRepo := repository.NewTransactionRepository(db.DB)
 	sessionRepo := repository.NewSessionRepository(db.DB)
+	nonceRepo := repository.NewNonceRepository(db.DB)
 
 	// 6. 初始化 Services
 	userService := services.NewUserService(userRepo)
@@ -115,7 +116,7 @@ func main() {
 	r.Use(middleware.LoggingMiddleware())
 
 	// 12. 設定路由
-	routes.SetupRoutes(r, userService, bondService, bondTokenService, sessionManager, cfg)
+	routes.SetupRoutes(r, userService, bondService, bondTokenService, sessionManager, nonceRepo, cfg)
 
 	// 13. 健康檢查路由
 	r.GET("/health", func(c *gin.Context) {

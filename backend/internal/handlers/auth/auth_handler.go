@@ -2,13 +2,13 @@ package auth
 
 import (
 	"bluelink-backend/internal/models"
+	"bluelink-backend/internal/repository"
 	"bluelink-backend/internal/services"
 	"bluelink-backend/internal/session"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/block-vision/sui-go-sdk/verify"
@@ -51,14 +51,8 @@ import (
 type AuthHandler struct {
 	userService    *services.UserService
 	sessionManager session.SessionManager
-	nonces         map[string]NonceData
-	mu             sync.RWMutex
+	nonceRepo      *repository.NonceRepository
 	isProduction   bool // 從配置讀取的環境標誌
-}
-
-type NonceData struct {
-	Nonce     string
-	Timestamp time.Time
 }
 
 type ChallengeRequest struct {
@@ -84,18 +78,13 @@ type VerifyResponse struct {
 	ExpiresAt     int64        `json:"expires_at"`
 }
 
-func NewAuthHandler(userService *services.UserService, sessionManager session.SessionManager, isProduction bool) *AuthHandler {
-	handler := &AuthHandler{
+func NewAuthHandler(userService *services.UserService, sessionManager session.SessionManager, nonceRepo *repository.NonceRepository, isProduction bool) *AuthHandler {
+	return &AuthHandler{
 		userService:    userService,
 		sessionManager: sessionManager,
-		nonces:         make(map[string]NonceData),
+		nonceRepo:      nonceRepo,
 		isProduction:   isProduction,
 	}
-
-	// 啟動清理協程
-	go handler.cleanupExpiredNonces()
-
-	return handler
 }
 
 // GenerateChallenge 產生挑戰訊息
@@ -107,7 +96,7 @@ func (h *AuthHandler) GenerateChallenge(c *gin.Context) {
 		return
 	}
 
-	// 生成隨機 nonce
+	// 生成隨機 nonce（32 bytes base64 編碼）
 	nonceBytes := make([]byte, 32)
 	if _, err := rand.Read(nonceBytes); err != nil {
 		models.RespondInternalError(c, "Failed to generate nonce", err)
@@ -115,14 +104,11 @@ func (h *AuthHandler) GenerateChallenge(c *gin.Context) {
 	}
 	nonce := base64.URLEncoding.EncodeToString(nonceBytes)
 
-	// 儲存 nonce
-	key := req.WalletAddress
-	h.mu.Lock()
-	h.nonces[key] = NonceData{
-		Nonce:     nonce,
-		Timestamp: time.Now(),
+	// 儲存 nonce 到資料庫，使用 wallet_address 作為 KEY，TTL 設置為 10 分鐘
+	if err := h.nonceRepo.Create(c.Request.Context(), req.WalletAddress, nonce, 10*time.Minute); err != nil {
+		models.RespondInternalError(c, "Failed to store nonce", err)
+		return
 	}
-	h.mu.Unlock()
 
 	// 構建要簽名的訊息（前端會簽署這個訊息）
 	message := fmt.Sprintf("Sign in to BlueLink\nNonce: %s", nonce)
@@ -142,37 +128,19 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		return
 	}
 
-	// 1. 驗證 nonce
-	key := req.WalletAddress
-	h.mu.RLock()
-	nonceData, exists := h.nonces[key]
-	h.mu.RUnlock()
-
-	if !exists {
-		models.RespondUnauthorized(c, "Nonce not found or expired")
-		return
-	}
-
-	// 檢查 nonce 是否匹配
-	if nonceData.Nonce != req.Nonce {
-		models.RespondUnauthorized(c, "Invalid nonce")
-		return
-	}
-
-	// 檢查是否過期（5 分鐘）
-	if time.Since(nonceData.Timestamp) > 5*time.Minute {
-		h.mu.Lock()
-		delete(h.nonces, key)
-		h.mu.Unlock()
-
-		models.RespondUnauthorized(c, "Nonce expired")
+	// 1. 驗證 nonce（使用 wallet_address 作為 KEY 查找）
+	// Verify 方法會自動檢查過期、比對 nonce、並在驗證成功後刪除（防止重放攻擊）
+	isValid, err := h.nonceRepo.Verify(c.Request.Context(), req.WalletAddress, req.Nonce)
+	if err != nil || !isValid {
+		models.RespondUnauthorized(c, fmt.Sprintf("Nonce verification failed: %v", err))
 		return
 	}
 
 	// 2. 驗證 Sui 簽名
+	// 構建相同的 message，確保與 challenge 時的格式一致
 	message := fmt.Sprintf("Sign in to BlueLink\nNonce: %s", req.Nonce)
-	isValid, signerAddress, err := h.verifySuiSignature(req.Signature, message)
-	if err != nil || !isValid {
+	isSigValid, signerAddress, err := h.verifySuiSignature(req.Signature, message)
+	if err != nil || !isSigValid {
 		models.RespondWithErrorDetails(c, http.StatusUnauthorized, "Invalid signature",
 			fmt.Sprintf("Verification failed: %v", err))
 		return
@@ -184,11 +152,6 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 			fmt.Sprintf("Provided %s, signed by %s", req.WalletAddress, signerAddress))
 		return
 	}
-
-	// 4. 刪除已使用的 nonce（防止重放攻擊）
-	h.mu.Lock()
-	delete(h.nonces, key)
-	h.mu.Unlock()
 
 	// 5. 取得或建立使用者
 	user, err := h.userService.GetByWalletAddress(c.Request.Context(), req.WalletAddress)
@@ -367,21 +330,4 @@ func (h *AuthHandler) verifySuiSignature(signatureB64, message string) (bool, st
 
 	// 4. 回傳驗證結果和簽名者地址
 	return true, signerAddress, nil
-}
-
-// cleanupExpiredNonces 定期清理過期的 nonce
-func (h *AuthHandler) cleanupExpiredNonces() {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		h.mu.Lock()
-		now := time.Now()
-		for key, data := range h.nonces {
-			if now.Sub(data.Timestamp) > 5*time.Minute {
-				delete(h.nonces, key)
-			}
-		}
-		h.mu.Unlock()
-	}
 }

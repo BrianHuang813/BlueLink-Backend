@@ -7,6 +7,7 @@ import (
 	"bluelink-backend/internal/handlers/users"
 	"bluelink-backend/internal/middleware"
 	"bluelink-backend/internal/models"
+	"bluelink-backend/internal/repository"
 	"bluelink-backend/internal/services"
 	"bluelink-backend/internal/session"
 	"net/http"
@@ -21,13 +22,14 @@ func SetupRoutes(
 	bondService *services.BondService,
 	bondTokenService *services.BondTokenService,
 	sessionManager session.SessionManager,
+	nonceRepo *repository.NonceRepository,
 	cfg *config.Config,
 ) {
 	// 判斷是否為生產環境
 	isProduction := cfg.Environment == "production"
 
 	// 初始化 handlers
-	authHandler := auth.NewAuthHandler(userService, sessionManager, isProduction)
+	authHandler := auth.NewAuthHandler(userService, sessionManager, nonceRepo, isProduction)
 	profileHandler := users.NewProfileHandler(userService)
 	bondHandler := bonds.NewBondHandler(bondService, bondTokenService)
 

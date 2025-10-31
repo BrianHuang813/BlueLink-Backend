@@ -246,6 +246,23 @@ func GetMigrations() []Migration {
 			`,
 			Down: `DROP TABLE IF EXISTS bond_tokens;`,
 		},
+		{
+			Version:     9,
+			Description: "Create nonces table",
+			Up: `
+				CREATE TABLE IF NOT EXISTS nonces (
+					id BIGSERIAL PRIMARY KEY,
+					wallet_address VARCHAR(66) UNIQUE NOT NULL,
+					nonce VARCHAR(255) NOT NULL,
+					created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					expires_at TIMESTAMP NOT NULL
+				);
+
+				CREATE INDEX IF NOT EXISTS idx_nonces_wallet_address ON nonces(wallet_address);
+				CREATE INDEX IF NOT EXISTS idx_nonces_expires_at ON nonces(expires_at);
+			`,
+			Down: `DROP TABLE IF EXISTS nonces;`,
+		},
 	}
 }
 
