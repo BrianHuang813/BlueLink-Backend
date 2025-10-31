@@ -8,11 +8,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
-	"github.com/block-vision/sui-go-sdk/verify"
+	suiModels "github.com/block-vision/sui-go-sdk/models"
 	"github.com/gin-gonic/gin"
 )
 
@@ -123,6 +122,28 @@ func (h *AuthHandler) GenerateChallenge(c *gin.Context) {
 // VerifySignature 驗證 Sui 錢包簽名
 // POST /api/v1/auth/verify
 func (h *AuthHandler) VerifySignature(c *gin.Context) {
+	// 安全檢查：確保 handler 已正確初始化
+	if h == nil {
+		fmt.Printf("[HANDLER ERROR] handler is nil\n")
+		models.RespondInternalError(c, "Handler not initialized", fmt.Errorf("handler is nil"))
+		return
+	}
+	if h.userService == nil {
+		fmt.Printf("[HANDLER ERROR] userService is nil\n")
+		models.RespondInternalError(c, "User service not initialized", fmt.Errorf("userService is nil"))
+		return
+	}
+	if h.sessionManager == nil {
+		fmt.Printf("[HANDLER ERROR] sessionManager is nil\n")
+		models.RespondInternalError(c, "Session manager not initialized", fmt.Errorf("sessionManager is nil"))
+		return
+	}
+	if h.nonceRepo == nil {
+		fmt.Printf("[HANDLER ERROR] nonceRepo is nil\n")
+		models.RespondInternalError(c, "Nonce repository not initialized", fmt.Errorf("nonceRepo is nil"))
+		return
+	}
+	
 	var req VerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		models.RespondBadRequest(c, "Invalid request format", err)
@@ -134,24 +155,24 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	isValid, err := h.nonceRepo.Verify(c.Request.Context(), req.WalletAddress, req.Nonce)
 	if err != nil || !isValid {
 		// 記錄詳細錯誤
-		log.Printf("[AUTH VERIFY] ❌ Nonce verification failed - wallet=%s, error=%v", req.WalletAddress, err)
+		fmt.Printf("[NONCE ERROR] wallet=%s, error=%v\n", req.WalletAddress, err)
 		models.RespondUnauthorized(c, fmt.Sprintf("Nonce verification failed: %v", err))
 		return
 	}
-	log.Printf("[AUTH VERIFY] ✅ Nonce verified - wallet=%s", req.WalletAddress)
+	fmt.Printf("[NONCE OK] wallet=%s verified successfully\n", req.WalletAddress)
 
 	// 2. 驗證 Sui 簽名
 	// 構建相同的 message，確保與 challenge 時的格式一致
 	message := fmt.Sprintf("Sign in to BlueLink\nNonce: %s", req.Nonce)
-	log.Printf("[AUTH VERIFY] 🔐 Verifying signature - message=%s, signature_len=%d", message, len(req.Signature))
+	fmt.Printf("[SIG VERIFY] message=%s, signature_len=%d\n", message, len(req.Signature))
 	isSigValid, signerAddress, err := h.verifySuiSignature(req.Signature, message)
 	if err != nil || !isSigValid {
-		log.Printf("[AUTH VERIFY] ❌ Signature verification failed - error=%v, valid=%v", err, isSigValid)
+		fmt.Printf("[SIG ERROR] error=%v, valid=%v\n", err, isSigValid)
 		models.RespondWithErrorDetails(c, http.StatusUnauthorized, "Invalid signature",
 			fmt.Sprintf("Verification failed: %v", err))
 		return
 	}
-	log.Printf("[AUTH VERIFY] ✅ Signature verified - signer=%s", signerAddress)
+	fmt.Printf("[SIG OK] signer=%s\n", signerAddress)
 
 	// 3. 驗證簽名者地址是否與提供的地址匹配
 	if signerAddress != req.WalletAddress {
@@ -164,24 +185,39 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	user, err := h.userService.GetByWalletAddress(c.Request.Context(), req.WalletAddress)
 	if err != nil {
 		// 使用者不存在，建立新使用者
-		// 如果前端提供了角色，使用該角色；否則預設為 buyer
+		// 如果前端提供了角色，使用該角色;否則預設為 buyer
 		role := req.Role
 		if role == "" {
 			role = "buyer" // 預設角色
 		}
 
-		log.Printf("[AUTH VERIFY] 👤 Creating new user - wallet=%s, role=%s", req.WalletAddress, role)
+		fmt.Printf("[USER CREATE] wallet=%s, role=%s\n", req.WalletAddress, role)
 		user, err = h.userService.CreateWithRole(c.Request.Context(), req.WalletAddress, role)
 		if err != nil {
-			log.Printf("[AUTH VERIFY] ❌ Failed to create user - error=%v", err)
+			fmt.Printf("[USER ERROR] failed to create user: %v\n", err)
 			models.RespondInternalError(c, "Failed to create user", err)
 			return
 		}
+		
+		// 確保 user 不是 nil
+		if user == nil {
+			fmt.Printf("[USER ERROR] user is nil after creation\n")
+			models.RespondInternalError(c, "Failed to create user", fmt.Errorf("user is nil"))
+			return
+		}
 	}
-	log.Printf("[AUTH VERIFY] ✅ User loaded - user_id=%d, wallet=%s", user.ID, user.WalletAddress)
+	
+	// 額外的安全檢查：確保 user 不是 nil
+	if user == nil {
+		fmt.Printf("[USER ERROR] user is nil after get/create\n")
+		models.RespondInternalError(c, "User data is invalid", fmt.Errorf("user is nil"))
+		return
+	}
+	
+	fmt.Printf("[USER OK] user_id=%d, wallet=%s\n", user.ID, user.WalletAddress)
 
 	// 6. 建立 session
-	log.Printf("[AUTH VERIFY] 🔑 Creating session - user_id=%d, wallet=%s, ip=%s", user.ID, req.WalletAddress, c.ClientIP())
+	fmt.Printf("[SESSION CREATE] user_id=%d, wallet=%s\n", user.ID, req.WalletAddress)
 	sess, err := h.sessionManager.Create(
 		user.ID,
 		req.WalletAddress,
@@ -191,11 +227,11 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		log.Printf("[AUTH VERIFY] ❌ Failed to create session - error=%v", err)
+		fmt.Printf("[SESSION ERROR] failed to create session: %v\n", err)
 		models.RespondInternalError(c, "Failed to create session", err)
 		return
 	}
-	log.Printf("[AUTH VERIFY] ✅ Session created - session_id=%s", sess.ID)
+	fmt.Printf("[SESSION OK] session_id=%s\n", sess.ID)
 
 	// 7. 設定 HttpOnly Cookie
 	cookie := &http.Cookie{
@@ -211,7 +247,6 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	http.SetCookie(c.Writer, cookie)
 
 	// 8. 回傳成功響應
-	log.Printf("[AUTH VERIFY] 🎉 Authentication successful - wallet=%s, session_id=%s", req.WalletAddress, sess.ID)
 	models.RespondWithSuccess(c, http.StatusOK, "Authentication successful", VerifyResponse{
 		SessionID:     sess.ID,
 		WalletAddress: req.WalletAddress,
@@ -316,24 +351,15 @@ func (h *AuthHandler) RevokeSession(c *gin.Context) {
 	models.RespondWithSuccess(c, http.StatusOK, "Session revoked successfully", nil)
 }
 
-// verifySuiSignature 使用 SDK 的 verify 套件驗證 Sui 簽名
+// verifySuiSignature 使用 SDK 的 models 套件驗證 Sui 簽名
 func (h *AuthHandler) verifySuiSignature(signatureB64, message string) (bool, string, error) {
-	// 1. 解碼 Base64 簽名
-	signatureBytes, err := base64.StdEncoding.DecodeString(signatureB64)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to decode signature: %w", err)
-	}
-
-	// 2. 準備訊息（轉為 bytes）
-	messageBytes := []byte(message)
-
-	// 3. 使用 SDK 的 VerifyPersonalMessageSignature
-	// 注意：如果不需要 zkLogin，options 可以傳 nil
-	signerAddress, pass, err := verify.VerifyPersonalMessageSignature(
-		messageBytes,
-		signatureBytes,
-		nil, // zkLogin options (一般錢包不需要，傳 nil)
-	)
+	// 使用 SDK 的 VerifyPersonalMessage 函數
+	// 這個函數接受:
+	// 1. message: 原始訊息字符串(不需要 base64 編碼)
+	// 2. signature: base64 編碼的序列化簽名 [flag_byte][signature_bytes][pubkey_bytes]
+	// 返回: (signer_address, pass, error)
+	
+	signerAddress, pass, err := suiModels.VerifyPersonalMessage(message, signatureB64)
 	if err != nil {
 		return false, "", fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -342,6 +368,6 @@ func (h *AuthHandler) verifySuiSignature(signatureB64, message string) (bool, st
 		return false, "", fmt.Errorf("signature verification failed: invalid signature")
 	}
 
-	// 4. 回傳驗證結果和簽名者地址
+	// 回傳驗證結果和簽名者地址
 	return true, signerAddress, nil
 }
