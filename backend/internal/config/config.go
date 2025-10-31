@@ -34,7 +34,8 @@ type Config struct {
 	SessionTimeout int // 秒
 
 	// 其他設定
-	LogLevel string
+	LogLevel           string
+	CORSAllowedOrigins []string // CORS 允許的來源清單
 }
 
 // LoadConfig 從環境變數載入配置
@@ -68,7 +69,8 @@ func LoadConfig() *Config {
 		SessionTimeout: getEnvAsInt("SESSION_TIMEOUT", 86400), // 24 小時
 
 		// 其他設定
-		LogLevel: getEnv("LOG_LEVEL", "info"),
+		LogLevel:           getEnv("LOG_LEVEL", "info"),
+		CORSAllowedOrigins: parseCORSOrigins(getEnv("CORS_ALLOWED_ORIGINS", "*")),
 	}
 
 	// 根據環境決定資料庫配置方式
@@ -155,6 +157,31 @@ func getEnvAsInt(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return value
+}
+
+// parseCORSOrigins 解析 CORS 允許來源字串
+func parseCORSOrigins(originsStr string) []string {
+	// 如果是 "*"，返回包含 "*" 的陣列
+	if strings.TrimSpace(originsStr) == "*" {
+		return []string{"*"}
+	}
+
+	// 否則按逗號分割
+	origins := strings.Split(originsStr, ",")
+	result := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+
+	// 如果沒有任何來源，預設返回 "*"
+	if len(result) == 0 {
+		return []string{"*"}
+	}
+
+	return result
 }
 
 // func getEnvAsBool(key string, defaultValue bool) bool {

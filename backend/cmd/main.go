@@ -109,7 +109,7 @@ func main() {
 	r := gin.Default()
 
 	// 11. 全域中間件
-	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.CORSMiddleware(cfg.CORSAllowedOrigins))
 	r.Use(middleware.RecoveryMiddleware())
 	r.Use(middleware.RequestIDMiddleware())
 	r.Use(middleware.LoggingMiddleware())
