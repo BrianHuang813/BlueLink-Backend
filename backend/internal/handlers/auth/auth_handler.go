@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -133,24 +134,24 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	isValid, err := h.nonceRepo.Verify(c.Request.Context(), req.WalletAddress, req.Nonce)
 	if err != nil || !isValid {
 		// 記錄詳細錯誤
-		fmt.Printf("[NONCE ERROR] wallet=%s, error=%v\n", req.WalletAddress, err)
+		log.Printf("[AUTH VERIFY] ❌ Nonce verification failed - wallet=%s, error=%v", req.WalletAddress, err)
 		models.RespondUnauthorized(c, fmt.Sprintf("Nonce verification failed: %v", err))
 		return
 	}
-	fmt.Printf("[NONCE OK] wallet=%s verified successfully\n", req.WalletAddress)
+	log.Printf("[AUTH VERIFY] ✅ Nonce verified - wallet=%s", req.WalletAddress)
 
 	// 2. 驗證 Sui 簽名
 	// 構建相同的 message，確保與 challenge 時的格式一致
 	message := fmt.Sprintf("Sign in to BlueLink\nNonce: %s", req.Nonce)
-	fmt.Printf("[SIG VERIFY] message=%s, signature_len=%d\n", message, len(req.Signature))
+	log.Printf("[AUTH VERIFY] 🔐 Verifying signature - message=%s, signature_len=%d", message, len(req.Signature))
 	isSigValid, signerAddress, err := h.verifySuiSignature(req.Signature, message)
 	if err != nil || !isSigValid {
-		fmt.Printf("[SIG ERROR] error=%v, valid=%v\n", err, isSigValid)
+		log.Printf("[AUTH VERIFY] ❌ Signature verification failed - error=%v, valid=%v", err, isSigValid)
 		models.RespondWithErrorDetails(c, http.StatusUnauthorized, "Invalid signature",
 			fmt.Sprintf("Verification failed: %v", err))
 		return
 	}
-	fmt.Printf("[SIG OK] signer=%s\n", signerAddress)
+	log.Printf("[AUTH VERIFY] ✅ Signature verified - signer=%s", signerAddress)
 
 	// 3. 驗證簽名者地址是否與提供的地址匹配
 	if signerAddress != req.WalletAddress {
@@ -169,18 +170,18 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 			role = "buyer" // 預設角色
 		}
 
-		fmt.Printf("[USER CREATE] wallet=%s, role=%s\n", req.WalletAddress, role)
+		log.Printf("[AUTH VERIFY] 👤 Creating new user - wallet=%s, role=%s", req.WalletAddress, role)
 		user, err = h.userService.CreateWithRole(c.Request.Context(), req.WalletAddress, role)
 		if err != nil {
-			fmt.Printf("[USER ERROR] failed to create user: %v\n", err)
+			log.Printf("[AUTH VERIFY] ❌ Failed to create user - error=%v", err)
 			models.RespondInternalError(c, "Failed to create user", err)
 			return
 		}
 	}
-	fmt.Printf("[USER OK] user_id=%d, wallet=%s\n", user.ID, user.WalletAddress)
+	log.Printf("[AUTH VERIFY] ✅ User loaded - user_id=%d, wallet=%s", user.ID, user.WalletAddress)
 
 	// 6. 建立 session
-	fmt.Printf("[SESSION CREATE] user_id=%d, wallet=%s\n", user.ID, req.WalletAddress)
+	log.Printf("[AUTH VERIFY] 🔑 Creating session - user_id=%d, wallet=%s, ip=%s", user.ID, req.WalletAddress, c.ClientIP())
 	sess, err := h.sessionManager.Create(
 		user.ID,
 		req.WalletAddress,
@@ -190,11 +191,11 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		c.Request.UserAgent(),
 	)
 	if err != nil {
-		fmt.Printf("[SESSION ERROR] failed to create session: %v\n", err)
+		log.Printf("[AUTH VERIFY] ❌ Failed to create session - error=%v", err)
 		models.RespondInternalError(c, "Failed to create session", err)
 		return
 	}
-	fmt.Printf("[SESSION OK] session_id=%s\n", sess.ID)
+	log.Printf("[AUTH VERIFY] ✅ Session created - session_id=%s", sess.ID)
 
 	// 7. 設定 HttpOnly Cookie
 	cookie := &http.Cookie{
@@ -210,6 +211,7 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	http.SetCookie(c.Writer, cookie)
 
 	// 8. 回傳成功響應
+	log.Printf("[AUTH VERIFY] 🎉 Authentication successful - wallet=%s, session_id=%s", req.WalletAddress, sess.ID)
 	models.RespondWithSuccess(c, http.StatusOK, "Authentication successful", VerifyResponse{
 		SessionID:     sess.ID,
 		WalletAddress: req.WalletAddress,
