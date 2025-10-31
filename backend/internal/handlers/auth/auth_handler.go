@@ -234,6 +234,14 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	fmt.Printf("[SESSION OK] session_id=%s\n", sess.ID)
 
 	// 7. 設定 HttpOnly Cookie
+	// 根據環境選擇 SameSite 策略:
+	// - 生產環境: SameSiteNoneMode (需要 Secure=true)
+	// - 開發環境: SameSiteLaxMode (允許跨域 GET 請求攜帶 cookie)
+	sameSite := http.SameSiteLaxMode
+	if h.isProduction {
+		sameSite = http.SameSiteNoneMode
+	}
+
 	cookie := &http.Cookie{
 		Name:     "session_id",
 		Value:    sess.ID,
@@ -242,7 +250,7 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 		MaxAge:   int(24 * time.Hour.Seconds()),
 		Secure:   h.isProduction,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: sameSite,
 	}
 	http.SetCookie(c.Writer, cookie)
 
