@@ -52,15 +52,13 @@ func main() {
 	defer db.Close()
 	log.Println("Database connected")
 
-	// 4. 執行資料庫遷移（開發環境）
+	// 4. 執行資料庫遷移
 	ctx := context.Background()
-	if cfg.Environment == "development" {
-		log.Println("Running database migrations...")
-		if err := db.Migrate(ctx); err != nil {
-			log.Printf("Migration warning: %v", err)
-		} else {
-			log.Println("Migrations completed")
-		}
+	log.Println("Running database migrations...")
+	if err := db.Migrate(ctx); err != nil {
+		log.Fatalf("Migration failed: %v", err)
+	} else {
+		log.Println("Migrations completed successfully")
 	}
 
 	// 5. 初始化 Repositories
