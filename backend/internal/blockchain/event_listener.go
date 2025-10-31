@@ -96,9 +96,14 @@ func (el *EventListener) pollEvents(ctx context.Context) {
 // queryAndProcessEvents 查詢並處理事件
 func (el *EventListener) queryAndProcessEvents(ctx context.Context) error {
 	// 使用 SuiX_QueryEvents API 查詢事件
+	// 注意：Sui 節點不再支援 Package 過濾器，改用 MoveModule 過濾器
+	// 這裡假設模組名為 "bond_project"，請根據實際合約調整
 	request := suiModels.SuiXQueryEventsRequest{
-		SuiEventFilter: suiModels.EventFilterByPackage{
-			Package: el.packageID,
+		SuiEventFilter: suiModels.EventFilterByMoveModule{
+			MoveModule: suiModels.MoveModule{
+				Package: el.packageID,
+				Module:  "blue_link", // 請根據你的合約模組名稱調整
+			},
 		},
 		Cursor:          el.lastCursor,
 		Limit:           50, // 每次查詢最多 50 個事件
