@@ -16,11 +16,16 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-// Create 建立新使用者
+// Create 建立新使用者（預設為 buyer）
 func (r *UserRepository) Create(ctx context.Context, walletAddress string) (*models.User, error) {
+	return r.CreateWithRole(ctx, walletAddress, "buyer")
+}
+
+// CreateWithRole 建立新使用者並指定角色
+func (r *UserRepository) CreateWithRole(ctx context.Context, walletAddress, role string) (*models.User, error) {
 	user := &models.User{
 		WalletAddress: walletAddress,
-		Role:          "buyer",
+		Role:          role,
 		Timezone:      "UTC",
 		Language:      "en",
 	}

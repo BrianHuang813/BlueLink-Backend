@@ -46,14 +46,31 @@ func (s *UserService) GetByWalletAddress(ctx context.Context, walletAddress stri
 	return user, nil
 }
 
-// Create 建立新使用者
+// Create 建立新使用者（預設為 buyer）
 func (s *UserService) Create(ctx context.Context, walletAddress string) (*models.User, error) {
-	user, err := s.repo.Create(ctx, walletAddress)
+	return s.CreateWithRole(ctx, walletAddress, "buyer")
+}
+
+// CreateWithRole 建立新使用者並指定角色
+func (s *UserService) CreateWithRole(ctx context.Context, walletAddress, role string) (*models.User, error) {
+	// 驗證角色
+	validRoles := map[string]bool{
+		"buyer":  true,
+		"issuer": true,
+		"admin":  false, // admin 不允許自行註冊
+	}
+
+	if !validRoles[role] || role == "admin" {
+		logger.Warn("Invalid role attempted during registration: %s for wallet %s", role, walletAddress)
+		role = "buyer" // 無效角色時預設為 buyer
+	}
+
+	user, err := s.repo.CreateWithRole(ctx, walletAddress, role)
 	if err != nil {
-		logger.Error("Failed to create user with wallet %s: %v", walletAddress, err)
+		logger.Error("Failed to create user with wallet %s and role %s: %v", walletAddress, role, err)
 		return nil, err
 	}
-	logger.Info("User created successfully: ID=%d, wallet=%s", user.ID, walletAddress)
+	logger.Info("User created successfully: ID=%d, wallet=%s, role=%s", user.ID, walletAddress, role)
 	return user, nil
 }
 

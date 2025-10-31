@@ -1,4 +1,8 @@
-tmp/
-
 backend/.env
+
 FRONTEND_GUIDE.md
+FRONTEND_CHECK_PROMPT.md
+FRONTEND_SESSION_CHECK.md
+
+# Binary file
+backend/tmp/backend

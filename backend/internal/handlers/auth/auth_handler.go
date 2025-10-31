@@ -74,6 +74,7 @@ type VerifyRequest struct {
 	WalletAddress string `json:"wallet_address" binding:"required"`
 	Signature     string `json:"signature" binding:"required"` // Base64 編碼的簽名
 	Nonce         string `json:"nonce" binding:"required"`
+	Role          string `json:"role"` // 可選：使用者角色 (buyer/issuer)，首次註冊時使用
 }
 
 type VerifyResponse struct {
@@ -193,7 +194,13 @@ func (h *AuthHandler) VerifySignature(c *gin.Context) {
 	user, err := h.userService.GetByWalletAddress(c.Request.Context(), req.WalletAddress)
 	if err != nil {
 		// 使用者不存在，建立新使用者
-		user, err = h.userService.Create(c.Request.Context(), req.WalletAddress)
+		// 如果前端提供了角色，使用該角色；否則預設為 buyer
+		role := req.Role
+		if role == "" {
+			role = "buyer" // 預設角色
+		}
+
+		user, err = h.userService.CreateWithRole(c.Request.Context(), req.WalletAddress, role)
 		if err != nil {
 			models.RespondInternalError(c, "Failed to create user", err)
 			return
