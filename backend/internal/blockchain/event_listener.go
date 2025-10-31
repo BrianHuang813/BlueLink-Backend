@@ -131,9 +131,11 @@ func (el *EventListener) queryAndProcessEvents(ctx context.Context) error {
 		}
 	}
 
-	// 更新游標
-	if response.HasNextPage {
-		el.lastCursor = &response.NextCursor
+	// 更新游標：無論是否有下一頁，都更新到最後一個事件
+	// 這樣可以避免重複查詢相同的事件
+	if len(response.Data) > 0 {
+		lastEvent := response.Data[len(response.Data)-1]
+		el.lastCursor = &lastEvent.Id
 	}
 
 	return nil
@@ -141,7 +143,11 @@ func (el *EventListener) queryAndProcessEvents(ctx context.Context) error {
 
 // handleEvent 處理單個事件
 func (el *EventListener) handleEvent(ctx context.Context, event suiModels.SuiEventResponse) error {
-	logger.Debug("📬 Processing event type: %s from tx: %s", event.Type, event.Id.TxDigest)
+	// 過濾 Sui 系統事件（不處理也不顯示）
+	if isSystemEvent(event.Type) {
+		// 靜默跳過系統事件，避免日誌污染
+		return nil
+	}
 
 	// 根據事件類型分發處理
 	switch {
@@ -506,6 +512,28 @@ func (el *EventListener) handleSaleResumed(ctx context.Context, event suiModels.
 }
 
 // 輔助函數
+
+// isSystemEvent 檢查是否為 Sui 系統事件（無需處理）
+func isSystemEvent(eventType string) bool {
+	// Sui 系統模組列表
+	systemModules := []string{
+		"0x2::display::",              // NFT 顯示配置
+		"0x2::coin::",                 // 代幣相關
+		"0x2::package::",              // 合約包管理
+		"0x2::transfer::",             // 轉帳相關
+		"0x1::string::",               // 字串相關
+		"0x2::dynamic_field::",        // 動態欄位
+		"0x2::dynamic_object_field::", // 動態物件欄位
+	}
+
+	for _, module := range systemModules {
+		if len(eventType) >= len(module) && eventType[:len(module)] == module {
+			return true
+		}
+	}
+	return false
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && s[len(s)-len(substr):] == substr
 }
