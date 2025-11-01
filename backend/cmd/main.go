@@ -69,19 +69,20 @@ func main() {
 	sessionRepo := repository.NewSessionRepository(db.DB)
 	nonceRepo := repository.NewNonceRepository(db.DB)
 
-	// 6. 初始化 Services
-	userService := services.NewUserService(userRepo)
-	bondService := services.NewBondService(bondRepo)
-	bondTokenService := services.NewBondTokenService(bondTokenRepo)
-
-	// 7. 初始化 Session Manager（使用 PostgreSQL）
-	sessionManager := session.NewPostgresSessionManager(sessionRepo)
-	log.Println("✅ Using PostgreSQL Session Manager (persistent sessions)")
-
-	// 8. 初始化 Sui Client
+	// 6. 初始化 Sui Client
 	log.Println("Initializing Sui client...")
 	suiClient := sui.NewSuiClient(cfg.SuiRPCURL)
 	log.Println("Sui client initialized")
+
+	// 7. 初始化 Services
+	userService := services.NewUserService(userRepo)
+	bondService := services.NewBondService(bondRepo)
+	bondTokenService := services.NewBondTokenService(bondTokenRepo)
+	syncService := services.NewSyncService(suiClient, cfg.SuiPackageID, bondRepo, userRepo, txRepo)
+
+	// 8. 初始化 Session Manager（使用 PostgreSQL）
+	sessionManager := session.NewPostgresSessionManager(sessionRepo)
+	log.Println("✅ Using PostgreSQL Session Manager (persistent sessions)")
 
 	// 9. 初始化並啟動區塊鏈事件監聽器
 	if cfg.SuiPackageID != "" {
@@ -114,7 +115,7 @@ func main() {
 	r.Use(middleware.LoggingMiddleware())
 
 	// 12. 設定路由
-	routes.SetupRoutes(r, userService, bondService, bondTokenService, sessionManager, nonceRepo, cfg)
+	routes.SetupRoutes(r, userService, bondService, bondTokenService, syncService, sessionManager, nonceRepo, cfg)
 
 	// 13. 健康檢查路由
 	r.GET("/health", func(c *gin.Context) {

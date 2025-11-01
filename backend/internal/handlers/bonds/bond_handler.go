@@ -12,19 +12,19 @@ import (
 type BondHandler struct {
 	bondService      *services.BondService
 	bondTokenService *services.BondTokenService
-	suiClient        interface{} // 將在路由設置時注入
+	syncService      *services.SyncService
 }
 
-func NewBondHandler(bondService *services.BondService, bondTokenService *services.BondTokenService) *BondHandler {
+func NewBondHandler(
+	bondService *services.BondService,
+	bondTokenService *services.BondTokenService,
+	syncService *services.SyncService,
+) *BondHandler {
 	return &BondHandler{
 		bondService:      bondService,
 		bondTokenService: bondTokenService,
+		syncService:      syncService,
 	}
-}
-
-// SetSuiClient 設置 Sui 客戶端 (用於同步交易)
-func (h *BondHandler) SetSuiClient(client interface{}) {
-	h.suiClient = client
 }
 
 // GetAllBonds 獲取所有上架債券
@@ -173,16 +173,32 @@ func (h *BondHandler) SyncTransaction(c *gin.Context) {
 		return
 	}
 
-	// 注意: 完整的鏈上交易同步邏輯較為複雜,需要:
-	// 1. 從 Sui 鏈上查詢交易詳情
-	// 2. 解析交易事件
-	// 3. 根據事件類型更新數據庫
-	//
-	// 目前的實現返回成功響應,實際的同步邏輯由事件監聽器處理
-	// 如果需要實時同步,可以在這裡調用 blockchain.EventListener 的相關方法
+	// 根據事件類型處理同步
+	var err error
+	switch req.EventType {
+	case "bond_created":
+		err = h.syncService.SyncBondCreated(c.Request.Context(), req.TransactionDigest)
+	case "bond_purchased":
+		err = h.syncService.SyncBondPurchased(c.Request.Context(), req.TransactionDigest)
+	case "bond_redeemed":
+		err = h.syncService.SyncBondRedeemed(c.Request.Context(), req.TransactionDigest)
+	case "funds_withdrawn":
+		// 暫時返回成功,由事件監聽器處理
+		models.RespondWithSuccess(c, http.StatusOK, "Transaction will be indexed by event listener", nil)
+		return
+	case "redemption_deposited":
+		// 暫時返回成功,由事件監聽器處理
+		models.RespondWithSuccess(c, http.StatusOK, "Transaction will be indexed by event listener", nil)
+		return
+	default:
+		models.RespondBadRequest(c, "Invalid event type", nil)
+		return
+	}
 
-	// TODO: 實現完整的交易同步邏輯
-	// 現階段先返回成功,交易會由後台事件監聽器自動處理
+	if err != nil {
+		models.RespondInternalError(c, "Failed to sync transaction", err)
+		return
+	}
 
-	models.RespondWithSuccess(c, http.StatusOK, "Transaction will be indexed by event listener", nil)
+	models.RespondWithSuccess(c, http.StatusOK, "Transaction indexed successfully", nil)
 }

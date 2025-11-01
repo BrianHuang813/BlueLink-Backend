@@ -21,6 +21,7 @@ func SetupRoutes(
 	userService *services.UserService,
 	bondService *services.BondService,
 	bondTokenService *services.BondTokenService,
+	syncService *services.SyncService,
 	sessionManager session.SessionManager,
 	nonceRepo *repository.NonceRepository,
 	cfg *config.Config,
@@ -31,7 +32,7 @@ func SetupRoutes(
 	// 初始化 handlers
 	authHandler := auth.NewAuthHandler(userService, sessionManager, nonceRepo, isProduction)
 	profileHandler := users.NewProfileHandler(userService)
-	bondHandler := bonds.NewBondHandler(bondService, bondTokenService)
+	bondHandler := bonds.NewBondHandler(bondService, bondTokenService, syncService)
 
 	// API v1
 	v1 := r.Group("/api/v1")

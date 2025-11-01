@@ -16,14 +16,15 @@ import (
 
 // EventListener Sui 區塊鏈事件監聽器
 type EventListener struct {
-	suiClient  sui.ISuiAPI                       // Sui 區塊鏈客戶端（查詢事件）
-	txRepo     *repository.TransactionRepository // 交易 Repository
-	bondRepo   *repository.BondRepository        // 債券 Repository
-	userRepo   *repository.UserRepository        // 使用者 Repository
-	packageID  string                            // 合約地址（過濾事件用）
-	stopChan   chan struct{}                     // 停止信號通道
-	isRunning  bool                              // 運行狀態
-	lastCursor *suiModels.EventId                // 游標（追蹤查詢進度）
+	suiClient   sui.ISuiAPI                       // Sui 區塊鏈客戶端（查詢事件）
+	chainReader *ChainReader                      // 鏈上數據讀取器
+	txRepo      *repository.TransactionRepository // 交易 Repository
+	bondRepo    *repository.BondRepository        // 債券 Repository
+	userRepo    *repository.UserRepository        // 使用者 Repository
+	packageID   string                            // 合約地址（過濾事件用）
+	stopChan    chan struct{}                     // 停止信號通道
+	isRunning   bool                              // 運行狀態
+	lastCursor  *suiModels.EventId                // 游標（追蹤查詢進度）
 }
 
 // NewEventListener 創建事件監聽器
@@ -35,14 +36,15 @@ func NewEventListener(
 	packageID string,
 ) *EventListener {
 	return &EventListener{
-		suiClient:  suiClient,
-		txRepo:     txRepo,
-		bondRepo:   bondRepo,
-		userRepo:   userRepo,
-		packageID:  packageID,
-		stopChan:   make(chan struct{}),
-		isRunning:  false,
-		lastCursor: nil,
+		suiClient:   suiClient,
+		chainReader: NewChainReader(suiClient, packageID),
+		txRepo:      txRepo,
+		bondRepo:    bondRepo,
+		userRepo:    userRepo,
+		packageID:   packageID,
+		stopChan:    make(chan struct{}),
+		isRunning:   false,
+		lastCursor:  nil,
 	}
 }
 
@@ -184,11 +186,16 @@ func (el *EventListener) handleBondProjectCreated(ctx context.Context, event sui
 		return nil
 	}
 
-	// 解析事件數據
-	bondID, _ := event.ParsedJson["id"].(string)
-	bondName, _ := event.ParsedJson["bond_name"].(string)
-	issuerName, _ := event.ParsedJson["issuer_name"].(string)
-	issuerAddress := event.Sender
+	logger.Info("🔍 Processing BondProjectCreated event, tx: %s", event.Id.TxDigest)
+
+	// 🆕 使用 ChainReader 從鏈上讀取完整的 BondProject 數據
+	bondData, err := el.chainReader.GetBondProjectFromTransaction(ctx, event.Id.TxDigest)
+	if err != nil {
+		logger.Error("❌ Failed to get bond project from chain: %v", err)
+		return fmt.Errorf("failed to get bond project from chain: %w", err)
+	}
+
+	issuerAddress := bondData.Issuer
 
 	// 查詢或創建發行者
 	user, err := el.userRepo.GetByWalletAddress(ctx, issuerAddress)
@@ -203,48 +210,28 @@ func (el *EventListener) handleBondProjectCreated(ctx context.Context, event sui
 	}
 
 	// 檢查債券是否已存在
-	bond, err := el.bondRepo.GetByOnChainID(ctx, bondID)
+	existingBond, err := el.bondRepo.GetByOnChainID(ctx, bondData.ObjectID)
 	if err != nil {
 		return fmt.Errorf("failed to get bond: %w", err)
 	}
 
-	if bond == nil {
-		// 解析合約數據（合約使用 u64，這裡使用 int64）
-		totalAmount := getInt64OrDefault(event.ParsedJson, "total_amount", 0)
-		annualInterestRate := getInt64OrDefault(event.ParsedJson, "annual_interest_rate", 0) / 10000 // 轉換 basis points 到百分比
-		maturityDateTimestamp := getInt64OrDefault(event.ParsedJson, "maturity_date", 0)
-		issueDateTimestamp := getInt64OrDefault(event.ParsedJson, "issue_date", 0)
-
-		// 從 Unix timestamp (ms) 轉換為日期字串 (YYYY-MM-DD)
-		maturityTime := time.Unix(0, maturityDateTimestamp*int64(time.Millisecond))
-		maturityDateStr := maturityTime.Format("2006-01-02")
-
-		issueTime := time.Unix(0, issueDateTimestamp*int64(time.Millisecond))
-		issueDateStr := issueTime.Format("2006-01-02")
-
-		// 創建債券記錄（對應合約的 BondProject 結構）
-		bond = &models.Bond{
-			OnChainID:             bondID,
-			IssuerAddress:         issuerAddress,
-			IssuerName:            issuerName,
-			BondName:              bondName,
-			TotalAmount:           totalAmount,
-			AmountRaised:          0, // 初始為 0
-			AmountRedeemed:        0, // 初始為 0
-			TokensIssued:          0, // 初始為 0
-			TokensRedeemed:        0, // 初始為 0
-			AnnualInterestRate:    annualInterestRate,
-			MaturityDate:          maturityDateStr,
-			IssueDate:             issueDateStr,
-			Active:                true,  // 新創建的債券預設為 active
-			Redeemable:            false, // 初始不可贖回
-			RaisedFundsBalance:    0,     // 初始餘額為 0
-			RedemptionPoolBalance: 0,     // 初始餘額為 0
-		}
+	var bond *models.Bond
+	if existingBond == nil {
+		// 轉換為數據庫模型並創建
+		bond = bondData.ToBondModel()
 
 		if err := el.bondRepo.Create(ctx, bond); err != nil {
 			return fmt.Errorf("failed to create bond: %w", err)
 		}
+
+		logger.Info("✅ Bond created in database:")
+		logger.Info("   📋 Name: %s", bond.BondName)
+		logger.Info("   🆔 On-chain ID: %s", bond.OnChainID)
+		logger.Info("   💰 Total Amount: %d MIST (%.2f SUI)", bond.TotalAmount, float64(bond.TotalAmount)/1e9)
+		logger.Info("   📊 Annual Interest Rate: %d (%.2f%%)", bond.AnnualInterestRate, float64(bond.AnnualInterestRate)/100)
+	} else {
+		bond = existingBond
+		logger.Info("Bond already exists: %s", bond.BondName)
 	}
 
 	// 創建交易記錄
@@ -266,7 +253,7 @@ func (el *EventListener) handleBondProjectCreated(ctx context.Context, event sui
 		return fmt.Errorf("failed to create transaction: %w", err)
 	}
 
-	logger.Info("✅ Bond project created: %s (%s) by %s", bondName, bondID, issuerName)
+	logger.Info("✅ Bond project created: %s (%s) by %s", bond.BondName, bond.OnChainID, bond.IssuerName)
 	return nil
 }
 
@@ -547,25 +534,6 @@ func getFloat64OrDefault(m map[string]interface{}, key string, defaultValue floa
 	}
 	if v, ok := m[key].(int64); ok {
 		return float64(v)
-	}
-	return defaultValue
-}
-
-func getInt64OrDefault(m map[string]interface{}, key string, defaultValue int64) int64 {
-	if v, ok := m[key].(int64); ok {
-		return v
-	}
-	if v, ok := m[key].(int); ok {
-		return int64(v)
-	}
-	if v, ok := m[key].(float64); ok {
-		return int64(v)
-	}
-	// 處理字串格式的數字
-	if v, ok := m[key].(string); ok {
-		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return parsed
-		}
 	}
 	return defaultValue
 }
