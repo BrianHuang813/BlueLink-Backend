@@ -74,6 +74,20 @@ func SetupRoutes(
 		)
 	}
 
+	// ===== 債券市場公開路由（不需要認證）=====
+	bondsPublic := v1.Group("/bonds")
+	{
+		// 獲取所有債券 - 公開訪問
+		bondsPublic.GET("", bondHandler.GetAllBonds)
+		bondsPublic.GET("/:id", bondHandler.GetBondByID)
+
+		// 同步鏈上交易 - 需要認證
+		bondsPublic.POST("/sync",
+			middleware.SessionAuthMiddleware(sessionManager),
+			bondHandler.SyncTransaction,
+		)
+	}
+
 	// ===== 3. 受保護路由（需要 Session）=====
 	protected := v1.Group("/")
 	protected.Use(
@@ -93,10 +107,6 @@ func SetupRoutes(
 			sessionGroup.GET("", authHandler.GetActiveSessions)            // 取得所有 session
 			sessionGroup.DELETE("/:session_id", authHandler.RevokeSession) // 撤銷特定 session
 		}
-
-		// Bond 相關
-		protected.GET("/bonds", bondHandler.GetAllBonds)
-		protected.GET("/bonds/:id", bondHandler.GetBondByID)
 
 		// 🆕 BondToken 相關
 		protected.GET("/bond-tokens/:id", bondHandler.GetBondTokenByID)

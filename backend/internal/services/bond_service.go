@@ -66,3 +66,23 @@ func (s *BondService) UpdateBondStatus(ctx context.Context, id int64, active, re
 	logger.Info("Bond status updated: ID=%d, active=%v, redeemable=%v", id, active, redeemable)
 	return nil
 }
+
+// IncrementAmountRaised 增加已募集金額
+func (s *BondService) IncrementAmountRaised(ctx context.Context, onChainID string, amount int64) error {
+	if err := s.repo.IncrementAmountRaised(ctx, onChainID, amount); err != nil {
+		logger.Error("Failed to increment amount raised for bond %s: %v", onChainID, err)
+		return err
+	}
+	logger.Info("Bond %s amount raised incremented by %d", onChainID, amount)
+	return nil
+}
+
+// IncrementAmountRedeemed 增加已贖回金額
+func (s *BondService) IncrementAmountRedeemed(ctx context.Context, onChainID string, amount int64) error {
+	if err := s.repo.IncrementAmountRedeemed(ctx, onChainID, amount); err != nil {
+		logger.Error("Failed to increment amount redeemed for bond %s: %v", onChainID, err)
+		return err
+	}
+	logger.Info("Bond %s amount redeemed incremented by %d", onChainID, amount)
+	return nil
+}

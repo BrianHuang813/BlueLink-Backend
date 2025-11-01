@@ -286,3 +286,57 @@ func (r *BondRepository) Delete(ctx context.Context, id int64) error {
 
 	return nil
 }
+
+// IncrementAmountRaised 增加已募集金額和已發行代幣數量
+func (r *BondRepository) IncrementAmountRaised(ctx context.Context, onChainID string, amount int64) error {
+	query := `
+		UPDATE bonds
+		SET amount_raised = amount_raised + $1,
+		    tokens_issued = tokens_issued + 1,
+		    updated_at = $2
+		WHERE on_chain_id = $3 AND deleted_at IS NULL
+	`
+
+	result, err := r.db.ExecContext(ctx, query, amount, time.Now(), onChainID)
+	if err != nil {
+		return fmt.Errorf("failed to increment amount raised: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get affected rows: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("bond not found or already deleted")
+	}
+
+	return nil
+}
+
+// IncrementAmountRedeemed 增加已贖回金額和已贖回代幣數量
+func (r *BondRepository) IncrementAmountRedeemed(ctx context.Context, onChainID string, amount int64) error {
+	query := `
+		UPDATE bonds
+		SET amount_redeemed = amount_redeemed + $1,
+		    tokens_redeemed = tokens_redeemed + 1,
+		    updated_at = $2
+		WHERE on_chain_id = $3 AND deleted_at IS NULL
+	`
+
+	result, err := r.db.ExecContext(ctx, query, amount, time.Now(), onChainID)
+	if err != nil {
+		return fmt.Errorf("failed to increment amount redeemed: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get affected rows: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("bond not found or already deleted")
+	}
+
+	return nil
+}

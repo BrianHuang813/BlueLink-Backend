@@ -52,3 +52,9 @@ type GetBondTokensByProjectRequest struct {
 type CalculateRedemptionRequest struct {
 	TokenID string `json:"token_id" binding:"required"` // 只需 tokenID，不再需要 projectID
 }
+
+// SyncTransactionRequest 同步鏈上交易請求
+type SyncTransactionRequest struct {
+	TransactionDigest string `json:"transaction_digest" binding:"required"`
+	EventType         string `json:"event_type" binding:"required,oneof=bond_created bond_purchased bond_redeemed funds_withdrawn redemption_deposited"`
+}
